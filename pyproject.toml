@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spatial-ray"
-version = "0.0.1"
+version = "0.0.2"
 description = "An adaptive serving framework for geospatial ML"
 readme = "README.md"
 license = "MIT"
