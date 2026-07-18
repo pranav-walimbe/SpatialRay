@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "spatial-ray"
 version = "0.0.2"
-description = "An adaptive serving framework for geospatial ML"
+description = "Adaptive inference serving framework for geospatial ML"
 readme = "README.md"
 license = "MIT"
 authors = [
@@ -17,11 +17,31 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "rasterio>=1.3",
+    "pystac-client>=0.7",
+    "numpy>=1.24",
 ]
 
 [project.urls]
 Homepage = "https://github.com/pranav-walimbe/SpatialRay"
 
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/spatial_ray"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "D"]
+ignore = ["D100", "D101", "D104", "D105", "D106", "D107", "D200", "D212"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
