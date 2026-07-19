@@ -58,7 +58,7 @@ def _measure_request(request, *, model, hardware, scratch, index):
             StageMeasurement(
                 name=record["name"],
                 wall_s=record["wall_s"],
-                rss_delta_b=record["rss_delta_b"],
+                rss_peak_b=record["rss_peak_b"],
                 vram_peak_b=record["vram_peak_b"],
             )
         )

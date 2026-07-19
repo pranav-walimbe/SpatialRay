@@ -42,7 +42,7 @@ def main() -> None:
             {
                 "name": measurement.name,
                 "wall_s": measurement.wall_s,
-                "rss_delta_b": measurement.rss_delta_b,
+                "rss_peak_b": measurement.rss_peak_b,
                 "vram_peak_b": measurement.vram_peak_b,
                 "n_tiles": n_tiles,
             }
@@ -51,19 +51,18 @@ def main() -> None:
 
 
 def _run_payload_stage(payload, name, output_path):
-    # Run a RasterPayload stage, measure its time and RSS, then dump the resulting payload
+    # Run a RasterPayload stage, measure its time and subprocess peak RSS, then dump the payload
     stage = _PAYLOAD_STAGES[name]
-    rss_before = peak_rss_bytes()
     start = time.perf_counter()
     payload = stage(payload)
     wall_s = time.perf_counter() - start
-    rss_delta = peak_rss_bytes() - rss_before
+    rss_peak = peak_rss_bytes()
     Path(output_path).write_bytes(pickle.dumps(payload))
-    return StageMeasurement(name=name, wall_s=wall_s, rss_delta_b=rss_delta, vram_peak_b=0), None
+    return StageMeasurement(name=name, wall_s=wall_s, rss_peak_b=rss_peak, vram_peak_b=0), None
 
 
 def _run_inference(payload, model_name, hardware):
-    # Run the model forward on the tile batch, measuring time, RSS, and CUDA peak on gpu
+    # Run the model forward on the tile batch, measuring time, subprocess peak RSS, and CUDA peak
     import torch  # lazy so the cpu preprocessing stages never import torch
 
     from perf.common.models import load
@@ -73,14 +72,13 @@ def _run_inference(payload, model_name, hardware):
     on_gpu = hardware == "gpu" and torch.cuda.is_available()
     if on_gpu:
         torch.cuda.reset_peak_memory_stats()
-    rss_before = peak_rss_bytes()
     start = time.perf_counter()
     model(tiles)
     wall_s = time.perf_counter() - start
-    rss_delta = peak_rss_bytes() - rss_before
+    rss_peak = peak_rss_bytes()
     vram = int(torch.cuda.max_memory_allocated()) if on_gpu else 0
     measurement = StageMeasurement(
-        name=INFERENCE_STAGE, wall_s=wall_s, rss_delta_b=rss_delta, vram_peak_b=vram
+        name=INFERENCE_STAGE, wall_s=wall_s, rss_peak_b=rss_peak, vram_peak_b=vram
     )
     return measurement, int(tiles.shape[0])
 

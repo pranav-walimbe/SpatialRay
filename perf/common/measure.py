@@ -16,7 +16,7 @@ _RU_MAXRSS_TO_BYTES = 1 if sys.platform == "darwin" else 1024
 class StageMeasurement:
     name: str  # stage name
     wall_s: float  # wall-clock seconds spent in the stage
-    rss_delta_b: int  # peak-RSS high-water-mark increase across the stage, in bytes
+    rss_peak_b: int  # peak resident set size of the stage subprocess, in bytes
     vram_peak_b: int  # peak CUDA memory during the stage in bytes, 0 when not on gpu
 
 

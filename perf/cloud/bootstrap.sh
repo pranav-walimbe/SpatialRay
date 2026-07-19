@@ -78,7 +78,9 @@ export TMPDIR=/data/scratch
 # rasterio /vsis3 and the aws CLI pick up IMDS credentials automatically once the region is set
 export AWS_DEFAULT_REGION="$REGION"
 log "measuring model=${MODEL} hardware=${HARDWARE}"
-uv run python -m perf.cloud.onbox --model "$MODEL" --hardware "$HARDWARE" > "$RESULT" 2>&1
+
+# result.txt gets stdout only
+uv run --no-sync python -m perf.cloud.onbox --model "$MODEL" --hardware "$HARDWARE" > "$RESULT"
 
 log "done"
 aws s3 cp "$RESULT" "${S3_BASE}/result.txt" --region "$REGION"

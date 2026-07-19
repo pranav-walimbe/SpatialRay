@@ -21,3 +21,7 @@ venv/
 
 # OS
 .DS_Store
+
+# Perf run results (local only, regenerated per run)
+assets/*
+!assets/.gitkeep
