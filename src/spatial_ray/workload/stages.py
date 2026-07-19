@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import numpy as np
 import rasterio
+from affine import Affine
 from rasterio.crs import CRS
 from rasterio.transform import array_bounds
 from rasterio.warp import Resampling, calculate_default_transform, reproject
-from rasterio.windows import Window
+from rasterio.windows import Window, from_bounds
+from rasterio.windows import bounds as window_bounds
+from rasterio.windows import transform as window_transform
 
 from spatial_ray.workload.metadata import RasterPayload, band_map
 
@@ -25,28 +28,37 @@ _GDAL_ENV = {
 
 
 def decode(payload: RasterPayload) -> RasterPayload:
-    """Read the request's AOI window from each remote band COG into a stacked array.
+    """Read the request's AOI from each remote band COG, resampling to the reference grid.
 
     Args:
         payload: Payload carrying the request, with array unset.
 
     Returns:
-        The payload with array, epsg, and transform set to the native decode.
+        The payload with array, epsg, and transform set to the reference-grid decode.
     """
     request = payload.request
     scene = request.scene
     bands = band_map(scene)
     row_off, col_off, height, width = request.window
-    window = Window(col_off, row_off, width, height)
+    ref_transform = Affine(*scene.transform)
+    ref_window = Window(col_off, row_off, width, height)
+    aoi_bounds = window_bounds(ref_window, ref_transform)
     stacked = []
     with rasterio.Env(**_GDAL_ENV):
         for name in request.band_names:
             with rasterio.open(bands[name].href) as src:
-                stacked.append(src.read(1, window=window))
-                transform = src.window_transform(window)
+                band_window = from_bounds(*aoi_bounds, transform=src.transform)
+                stacked.append(
+                    src.read(
+                        1,
+                        window=band_window,
+                        out_shape=(height, width),
+                        resampling=Resampling.bilinear,
+                    )
+                )
     payload.array = np.stack(stacked, axis=0)
     payload.epsg = scene.epsg
-    payload.transform = transform
+    payload.transform = window_transform(ref_window, ref_transform)
     return payload
 
 

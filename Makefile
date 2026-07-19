@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := fix
 
-.PHONY: sync fix lint test ci perf-preprocess
+.PHONY: sync fix lint test ci perf-preprocess perf-serve
 
 sync:
 	uv sync --group dev
@@ -20,3 +20,6 @@ ci: lint test
 
 perf-preprocess:
 	uv run python -m perf.preprocess
+
+perf-serve:
+	uv run --extra perf python -m perf.serve

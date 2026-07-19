@@ -26,6 +26,15 @@ dependencies = [
     "numpy>=1.24",
 ]
 
+[project.optional-dependencies]
+serve = [
+    "ray[serve]>=2.9",
+    "torch>=2.2",
+]
+perf = [
+    "spatial-ray[serve]",
+]
+
 [project.urls]
 Homepage = "https://github.com/pranav-walimbe/SpatialRay"
 
