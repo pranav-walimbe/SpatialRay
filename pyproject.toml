@@ -34,6 +34,10 @@ serve = [
 perf = [
     "spatial-ray[serve]",
 ]
+cloud = [
+    "boto3>=1.34",
+    "pyyaml>=6",
+]
 
 [project.urls]
 Homepage = "https://github.com/pranav-walimbe/SpatialRay"

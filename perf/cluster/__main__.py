@@ -11,57 +11,37 @@ from collections.abc import Sequence
 
 from ray import serve
 
-from perf.serve.models import DEFAULT_MODEL, load
-from spatial_ray.serve.graph import build_graph
-from spatial_ray.workload.catalog import resolve_scenes
+from perf.common.models import DEFAULT_MODEL, load
+from perf.common.trace import build_default_trace
+from spatial_ray.serve.graph import InferenceSpec, build_graph
 from spatial_ray.workload.metadata import RasterPayload, RasterRequest
 from spatial_ray.workload.stages import PIPELINE
-from spatial_ray.workload.trace import build_trace
 
-STAC_API_URL = "https://earth-search.aws.element84.com/v1"
-COLLECTION = "sentinel-2-l2a"
-
-# Fixed, low-cloud Sentinel-2 L2A scenes over one tile (10SEH, San Francisco Bay)
-SCENE_IDS: tuple[str, ...] = (
-    "S2A_10SEH_20230708_0_L2A",
-    "S2B_10SEH_20230713_0_L2A",
-    "S2A_10SEH_20230728_0_L2A",
-    "S2A_10SEH_20230731_0_L2A",
-)
-
-WINDOW_SIZE = 1024  # native-pixel side length of each request's AOI window
-TARGET_EPSG = 3857  # Web Mercator, the standard tile-serving CRS
-TARGET_GSD = 10.0  # target ground sample distance in meters
-
-RATE_PER_S = 1.0  # Poisson mean arrival rate
-DURATION_S = 4.0  # arrival horizon
-SEED = 0  # trace reproducibility seed
 FORWARD_REPEATS = 5  # forward passes timed to average the isolated forward cost
+
+HARDWARE_NUM_GPUS = {"cpu": 0, "gpu": 1}  # inference-pool GPU request per hardware target
 
 
 def main() -> None:
     """Deploy the graph for the chosen model, run a trace through it, and report timings."""
     parser = argparse.ArgumentParser(description="Run a trace through the disaggregated graph.")
     parser.add_argument(
-        "--model", default=DEFAULT_MODEL, help="model module under perf.serve.models"
+        "--model", default=DEFAULT_MODEL, help="model module under perf.common.models"
+    )
+    parser.add_argument(
+        "--hardware",
+        default="cpu",
+        choices=tuple(HARDWARE_NUM_GPUS),
+        help="hardware target that sets the inference pool GPU request",
     )
     args = parser.parse_args()
     model = load(args.model)
-    scenes = resolve_scenes(
-        SCENE_IDS, stac_api_url=STAC_API_URL, collection=COLLECTION, band_names=model.BAND_NAMES
+    trace = build_default_trace(model)
+    inference = InferenceSpec(
+        model_factory=model.build,
+        ray_actor_options={"num_gpus": HARDWARE_NUM_GPUS[args.hardware]},
     )
-    trace = build_trace(
-        scenes,
-        rate_per_s=RATE_PER_S,
-        duration_s=DURATION_S,
-        window_size=WINDOW_SIZE,
-        band_names=model.BAND_NAMES,
-        target_epsg=TARGET_EPSG,
-        target_gsd=TARGET_GSD,
-        tile_size=model.TILE_SIZE,
-        seed=SEED,
-    )
-    handle = serve.run(build_graph(model_factory=model.build))
+    handle = serve.run(build_graph(inference=inference))
     latencies = [_request_s(handle, entry.request) for entry in trace]
     serve.shutdown()
     forward_ms = _forward_ms(model.build(), _tiles(trace[0].request))

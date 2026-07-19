@@ -52,7 +52,8 @@ class _ViT(nn.Module):
 
 class ViTInference:
     def __init__(self, module: nn.Module) -> None:
-        self._module = module.eval()
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._module = module.eval().to(self._device)
 
     def __call__(self, tiles: np.ndarray) -> np.ndarray:
         """Run the forward pass over a tile batch and return the embeddings.
@@ -64,9 +65,9 @@ class ViTInference:
             (n_tiles, embed_dim) embedding array.
         """
         with torch.no_grad():
-            batch = torch.from_numpy(np.ascontiguousarray(tiles)).float()
+            batch = torch.from_numpy(np.ascontiguousarray(tiles)).float().to(self._device)
             out = self._module(batch)
-        return out.numpy()
+        return out.cpu().numpy()
 
 
 def build() -> ViTInference:
