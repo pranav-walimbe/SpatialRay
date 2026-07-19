@@ -96,22 +96,30 @@ def reproject_stage(payload: RasterPayload) -> RasterPayload:
 
 
 def normalize(payload: RasterPayload) -> RasterPayload:
-    """Convert per-band digital numbers to clipped surface reflectance in [0, 1].
+    """Convert per-band digital numbers to a model-ready reflectance array.
+
+    With no per-request stats each band becomes surface reflectance clipped to [0, 1]. When the
+    request carries normalize_mean and normalize_std the band is standardized to them, unclipped.
 
     Args:
         payload: Payload with array set to warped digital numbers.
 
     Returns:
-        The payload with array replaced by a float32 reflectance array.
+        The payload with array replaced by a float32 model-ready array.
     """
-    bands = band_map(payload.request.scene)
+    request = payload.request
+    bands = band_map(request.scene)
+    mean, std = request.normalize_mean, request.normalize_std
+    standardize = mean is not None and std is not None
     out = np.empty(payload.array.shape, dtype=np.float32)
-    for i, name in enumerate(payload.request.band_names):
+    for i, name in enumerate(request.band_names):
         profile = bands[name]
-        band = payload.array[i].astype(np.float32)
         nodata_mask = payload.array[i] == profile.nodata
-        band = band * profile.scale + profile.offset
-        np.clip(band, 0.0, 1.0, out=band)
+        band = payload.array[i].astype(np.float32) * profile.scale + profile.offset
+        if standardize:
+            band = (band - mean[i]) / std[i]
+        else:
+            np.clip(band, 0.0, 1.0, out=band)
         band[nodata_mask] = 0.0
         out[i] = band
     payload.array = out

@@ -38,6 +38,8 @@ class RasterRequest:
     target_epsg: int  # CRS to reproject into
     target_gsd: float  # target ground sample distance in meters
     tile_size: int  # side length of the square model-input tiles
+    normalize_mean: tuple[float, ...] | None = None  # per-band reflectance mean, or None to clip
+    normalize_std: tuple[float, ...] | None = None  # per-band reflectance std, set with the mean
 
 
 @dataclass
@@ -47,12 +49,6 @@ class RasterPayload:
     epsg: int | None = None  # CRS of `array`: native after decode, target after reproject
     transform: Affine | None = None  # affine of `array`
     tiles: np.ndarray | None = None  # (n_tiles, bands, tile, tile), None until the tile stage
-
-
-@dataclass(frozen=True)
-class TraceEntry:
-    arrival_s: float  # arrival timestamp in seconds since trace start
-    request: RasterRequest  # request that arrives at `arrival_s`
 
 
 def band_map(scene: SceneRef) -> dict[str, BandProfile]:

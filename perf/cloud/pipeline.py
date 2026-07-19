@@ -13,7 +13,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from perf.common.measure import RequestMeasurement, StageMeasurement
-from spatial_ray.workload.metadata import RasterPayload, TraceEntry
+from perf.common.trace import TraceEntry
+from spatial_ray.workload.metadata import RasterPayload
 
 # Stage names in execution order, decode through the terminal inference stage
 STAGE_SEQUENCE = ("decode", "reproject_stage", "normalize", "tile", "inference")

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import random
 
+from perf.common.trace import build_trace, poisson_arrivals
 from spatial_ray.workload.metadata import BandProfile, SceneRef
-from spatial_ray.workload.trace import build_trace, poisson_arrivals
 
 
 def _scene(shape: tuple[int, int]) -> SceneRef:
