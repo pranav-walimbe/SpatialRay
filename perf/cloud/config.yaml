@@ -11,12 +11,12 @@ instance_profile: spatialray-perf
 region: us-west-2
 cpu_instance_type: m7i.xlarge
 gpu_instance_type: g4dn.xlarge
-volume_gb: 40
+volume_gb: 50
 max_runtime_min: 30
 
 # AMIs resolved via SSM: AL2023 for cpu, an AWS Deep Learning AMI for the T4 gpu box
 cpu_ami_ssm: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
-gpu_ami_ssm: ""
+gpu_ami_ssm: /aws/service/deeplearning/ami/x86_64/proprietary-nvidia-driver-gpu-pytorch-2.3-ubuntu-20.04/latest/ami-id
 
 # source repo the box builds
 repo_url: https://github.com/pranav-walimbe/SpatialRay.git
