@@ -22,6 +22,7 @@ class PoolSpec:
     name: str  # Serve deployment name for the pool
     stages: tuple[Stage, ...]  # phase-1 stage functions the pool runs in order
     num_replicas: int = DEFAULT_NUM_REPLICAS  # static replica count when not autoscaling
+    max_ongoing_requests: int | None = None  # per-replica request cap, None keeps Serve's default
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling, overrides num_replicas
 
@@ -31,22 +32,34 @@ class InferenceSpec:
     model_factory: Callable[[], object]  # zero-arg factory building the model on each replica
     name: str = "inference"  # Serve deployment name for the inference pool
     num_replicas: int = DEFAULT_NUM_REPLICAS  # static replica count when not autoscaling
+    max_ongoing_requests: int | None = None  # per-replica request cap, None keeps Serve's default
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling, overrides num_replicas
 
 
 DISAGGREGATED: tuple[PoolSpec, ...] = (
-    PoolSpec(name="decode", stages=(decode,)),
+    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=64),
     PoolSpec(name="transform", stages=(reproject_stage, normalize, tile)),
 )
 
 
-def _deployment_options(spec: PoolSpec | InferenceSpec) -> dict[str, Any]:
-    # Shared deployment fields as Serve .options() kwargs, autoscaling_config replaces num_replicas
+def deployment_options(spec: PoolSpec | InferenceSpec) -> dict[str, Any]:
+    """Render a pool or inference spec's shared fields as Serve deployment options.
+
+    Args:
+        spec: Pool or inference spec to render.
+
+    Returns:
+        Kwargs for Serve's .options(), and equally the shape of one serveConfigV2 deployment
+        entry: name, ray_actor_options, an optional max_ongoing_requests, and either
+        autoscaling_config or num_replicas.
+    """
     options: dict[str, Any] = {
         "name": spec.name,
         "ray_actor_options": dict(spec.ray_actor_options),
     }
+    if spec.max_ongoing_requests is not None:
+        options["max_ongoing_requests"] = spec.max_ongoing_requests
     if spec.autoscaling_config is not None:
         options["autoscaling_config"] = dict(spec.autoscaling_config)
     else:
@@ -69,12 +82,12 @@ def build_graph(
         The bound ingress application ready for serve.run or the serve run CLI.
     """
     pools = [
-        serve.deployment(StagePool).options(**_deployment_options(spec)).bind(spec.stages)
+        serve.deployment(StagePool).options(**deployment_options(spec)).bind(spec.stages)
         for spec in grouping
     ]
     inference_pool = (
         serve.deployment(InferencePool)
-        .options(**_deployment_options(inference))
+        .options(**deployment_options(inference))
         .bind(inference.model_factory)
     )
     return serve.deployment(Ingress).options(name="ingress").bind(pools, inference_pool)

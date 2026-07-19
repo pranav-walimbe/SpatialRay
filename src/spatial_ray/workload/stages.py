@@ -4,6 +4,9 @@ The four preprocessing stages as modular functions reading directly from remote 
 
 from __future__ import annotations
 
+import math
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import rasterio
 from affine import Affine
@@ -22,9 +25,22 @@ _GDAL_ENV = {
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "AWS_NO_SIGN_REQUEST": "YES",
     "GDAL_HTTP_MULTIPLEX": "YES",
+    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
+    "CPL_VSIL_CURL_CHUNK_SIZE": "1048576",
+    "GDAL_CACHEMAX": "512",
     "VSI_CACHE": "TRUE",
     "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif",
 }
+
+
+def _align_to_blocks(window: Window, block_shape: tuple[int, int]) -> Window:
+    # Snap a pixel window outward to whole block_shape units so GDAL fetches only full tiles
+    block_h, block_w = block_shape
+    row_off = math.floor(window.row_off / block_h) * block_h
+    col_off = math.floor(window.col_off / block_w) * block_w
+    row_end = math.ceil((window.row_off + window.height) / block_h) * block_h
+    col_end = math.ceil((window.col_off + window.width) / block_w) * block_w
+    return Window(col_off, row_off, col_end - col_off, row_end - row_off)
 
 
 def decode(payload: RasterPayload) -> RasterPayload:
@@ -43,19 +59,32 @@ def decode(payload: RasterPayload) -> RasterPayload:
     ref_transform = Affine(*scene.transform)
     ref_window = Window(col_off, row_off, width, height)
     aoi_bounds = window_bounds(ref_window, ref_transform)
-    stacked = []
-    with rasterio.Env(**_GDAL_ENV):
-        for name in request.band_names:
-            with rasterio.open(bands[name].href) as src:
-                band_window = from_bounds(*aoi_bounds, transform=src.transform)
-                stacked.append(
-                    src.read(
-                        1,
-                        window=band_window,
-                        out_shape=(height, width),
-                        resampling=Resampling.bilinear,
-                    )
+
+    def _read_band(name: str) -> np.ndarray:
+        # Read one band's AOI, block-aligning the fetch when its native grid matches the reference
+        with rasterio.open(bands[name].href) as src:
+            band_window = from_bounds(*aoi_bounds, transform=src.transform)
+            same_resolution = math.isclose(src.transform.a, ref_transform.a) and math.isclose(
+                src.transform.e, ref_transform.e
+            )
+            if not same_resolution:
+                return src.read(
+                    1,
+                    window=band_window,
+                    out_shape=(height, width),
+                    resampling=Resampling.bilinear,
                 )
+            aligned = _align_to_blocks(band_window, src.block_shapes[0])
+            array = src.read(1, window=aligned, resampling=Resampling.bilinear)
+            row_start = round(band_window.row_off - aligned.row_off)
+            col_start = round(band_window.col_off - aligned.col_off)
+            return array[row_start : row_start + height, col_start : col_start + width]
+
+    with (
+        rasterio.Env(**_GDAL_ENV),
+        ThreadPoolExecutor(max_workers=len(request.band_names)) as pool,
+    ):
+        stacked = list(pool.map(_read_band, request.band_names))
     payload.array = np.stack(stacked, axis=0)
     payload.epsg = scene.epsg
     payload.transform = window_transform(ref_window, ref_transform)

@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import numpy as np
 from affine import Affine
+from rasterio.windows import Window
 
 from spatial_ray.workload.metadata import BandProfile, RasterPayload, RasterRequest, SceneRef
-from spatial_ray.workload.stages import normalize, reproject_stage, tile
+from spatial_ray.workload.stages import _align_to_blocks, normalize, reproject_stage, tile
 
 
 def _band(
@@ -63,6 +64,20 @@ def test_tile_cuts_row_major_blocks():
     assert payload.tiles.shape == (4, 1, 2, 2)
     assert np.array_equal(payload.tiles[0, 0], [[0, 1], [4, 5]])
     assert np.array_equal(payload.tiles[3, 0], [[10, 11], [14, 15]])
+
+
+def test_align_to_blocks_is_a_no_op_for_an_already_aligned_window():
+    """A window that already sits on block boundaries is returned unchanged."""
+    window = Window(512, 1024, 512, 512)
+    assert _align_to_blocks(window, (512, 512)) == window
+
+
+def test_align_to_blocks_snaps_outward_to_the_block_grid():
+    """An unaligned window is expanded outward to the nearest full blocks."""
+    window = Window(600, 100, 200, 50)
+    aligned = _align_to_blocks(window, (512, 512))
+    assert (aligned.col_off, aligned.row_off) == (512, 0)
+    assert (aligned.width, aligned.height) == (512, 512)
 
 
 def test_reproject_changes_crs_and_preserves_bands():
