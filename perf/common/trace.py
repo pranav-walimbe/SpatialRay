@@ -19,22 +19,22 @@ class TraceEntry:
     request: RasterRequest  # request that arrives at `arrival_s`
 
 
-def poisson_arrivals(rate_per_s: float, duration_s: float, rng: random.Random) -> list[float]:
-    """Draw Poisson-process arrival times over a fixed horizon.
+def poisson_arrivals(rate_per_s: float, n: int, rng: random.Random) -> list[float]:
+    """Draw a fixed number of Poisson-process arrival times.
 
     Args:
         rate_per_s: Mean arrival rate lambda in requests per second.
-        duration_s: Length of the arrival horizon in seconds.
+        n: Number of arrivals to draw.
         rng: Seeded random source for reproducibility.
 
     Returns:
-        Ascending arrival timestamps within [0, duration_s).
+        n ascending arrival timestamps starting from t=0.
     """
     arrivals = []
-    clock = rng.expovariate(rate_per_s)
-    while clock < duration_s:
-        arrivals.append(clock)
+    clock = 0.0
+    for _ in range(n):
         clock += rng.expovariate(rate_per_s)
+        arrivals.append(clock)
     return arrivals
 
 
@@ -42,7 +42,7 @@ def build_trace(
     scenes: Sequence[SceneRef],
     *,
     rate_per_s: float,
-    duration_s: float,
+    n: int,
     window_size: int,
     band_names: Sequence[str],
     target_epsg: int,
@@ -52,7 +52,7 @@ def build_trace(
     normalize_mean: Sequence[float] | None = None,
     normalize_std: Sequence[float] | None = None,
 ) -> list[TraceEntry]:
-    """Generate a Poisson trace of requests sampled uniformly over the scene set.
+    """Generate a Poisson trace of exactly n requests sampled uniformly over the scene set.
 
     Each arrival draws a scene uniformly and a random in-bounds AOI window, so
     burstiness comes from arrival timing rather than from scene skew.
@@ -60,7 +60,7 @@ def build_trace(
     Args:
         scenes: Fixed scene set to sample requests from.
         rate_per_s: Mean arrival rate lambda in requests per second.
-        duration_s: Length of the arrival horizon in seconds.
+        n: Number of requests to generate.
         window_size: Side length in native pixels of the square AOI window.
         band_names: Ordered band names each request decodes.
         target_epsg: CRS every request reprojects into.
@@ -71,12 +71,12 @@ def build_trace(
         normalize_std: Per-band reflectance std, paired with normalize_mean.
 
     Returns:
-        Trace entries ordered by arrival time.
+        n trace entries ordered by arrival time.
     """
     mean = tuple(normalize_mean) if normalize_mean is not None else None
     std = tuple(normalize_std) if normalize_std is not None else None
     rng = random.Random(seed)
-    arrivals = poisson_arrivals(rate_per_s, duration_s, rng)
+    arrivals = poisson_arrivals(rate_per_s, n, rng)
     entries = []
     for arrival in arrivals:
         scene = rng.choice(scenes)
@@ -110,8 +110,7 @@ def _sample_window(
 STAC_API_URL = "https://earth-search.aws.element84.com/v1"
 COLLECTION = "sentinel-2-l2a"
 
-# Fixed, low-cloud Sentinel-2 L2A scenes over one tile (10SEH, San Francisco Bay).
-# These item ids are stable in the open sentinel-cogs bucket and pin the workload.
+# Fixed sentinel-2 L2A scenes over one tile (10SEH, San Francisco Bay)
 SCENE_IDS: tuple[str, ...] = (
     "S2A_10SEH_20230708_0_L2A",
     "S2B_10SEH_20230713_0_L2A",
@@ -124,27 +123,30 @@ TARGET_EPSG = 3857  # Web Mercator, the standard tile-serving CRS
 TARGET_GSD = 10.0  # target ground sample distance in meters
 
 RATE_PER_S = 1.0  # Poisson mean arrival rate
-DURATION_S = 6.0  # arrival horizon
 SEED = 0  # trace reproducibility seed
 
 
-def build_default_trace(model: ModuleType) -> list[TraceEntry]:
-    """Resolve the fixed scenes and build the standard Poisson trace for a model.
+def build_default_trace(
+    model: ModuleType, *, n: int, rate_per_s: float = RATE_PER_S
+) -> list[TraceEntry]:
+    """Resolve the fixed scenes and build an n-request Poisson trace for a model.
 
     Args:
         model: Loaded model module exposing BAND_NAMES, TILE_SIZE, and optional
             NORMALIZE_MEAN and NORMALIZE_STD.
+        n: Number of requests to generate.
+        rate_per_s: Mean Poisson arrival rate in requests per second.
 
     Returns:
-        The trace entries in arrival order for the fixed scene set.
+        n trace entries in arrival order for the fixed scene set.
     """
     scenes = resolve_scenes(
         SCENE_IDS, stac_api_url=STAC_API_URL, collection=COLLECTION, band_names=model.BAND_NAMES
     )
     return build_trace(
         scenes,
-        rate_per_s=RATE_PER_S,
-        duration_s=DURATION_S,
+        rate_per_s=rate_per_s,
+        n=n,
         window_size=WINDOW_SIZE,
         band_names=model.BAND_NAMES,
         target_epsg=TARGET_EPSG,

@@ -5,15 +5,21 @@ The Serve deployment classes for the disaggregated pipeline pools and the compos
 from __future__ import annotations
 
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 
 from spatial_ray.serve.messages import Predictions, TileBatch
 from spatial_ray.workload.metadata import RasterPayload, RasterRequest
 from spatial_ray.workload.profiler import Stage
+from spatial_ray.workload.stages.decode import _DECODE_NUM_WORKERS, decode
 
 
 class StagePool:
     def __init__(self, stages: Sequence[Stage]) -> None:
         self._stages = tuple(stages)
+        # decode is the one stage needing shared IO concurrency, one pool per replica/process
+        self._io_pool = (
+            ThreadPoolExecutor(max_workers=_DECODE_NUM_WORKERS) if decode in self._stages else None
+        )
 
     def run(self, payload: RasterPayload) -> RasterPayload:
         """Run this pool's stages in order on the payload.
@@ -25,8 +31,13 @@ class StagePool:
             The payload after all of the pool's stages have run.
         """
         for stage in self._stages:
-            payload = stage(payload)
+            payload = stage(payload, self._io_pool) if stage is decode else stage(payload)
         return payload
+
+    def shutdown(self) -> None:
+        """Release this pool's shared IO thread pool, if it created one."""
+        if self._io_pool is not None:
+            self._io_pool.shutdown()
 
 
 class InferencePool:

@@ -36,9 +36,6 @@ def time_pipeline(
 ) -> tuple[RasterPayload, PipelineReport]:
     """Run each stage in sequence, timing wall-clock cost and peak-RSS delta.
 
-    Peak RSS is a monotonic high-water mark, so a stage that only frees memory
-    reports a zero delta rather than a decrease.
-
     Args:
         payload: Initial payload fed into the first stage.
         stages: Stage functions to run in order on the payload.

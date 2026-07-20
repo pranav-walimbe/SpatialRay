@@ -31,10 +31,10 @@ def _scene(shape: tuple[int, int]) -> SceneRef:
 
 
 def test_poisson_arrivals_are_sorted_within_horizon():
-    """poisson_arrivals returns ascending timestamps inside the horizon."""
-    arrivals = poisson_arrivals(2.0, 5.0, random.Random(0))
+    """poisson_arrivals returns n ascending timestamps."""
+    arrivals = poisson_arrivals(2.0, 5, random.Random(0))
+    assert len(arrivals) == 5
     assert arrivals == sorted(arrivals)
-    assert all(0.0 <= a < 5.0 for a in arrivals)
 
 
 def test_build_trace_samples_windows_in_bounds():
@@ -42,7 +42,7 @@ def test_build_trace_samples_windows_in_bounds():
     entries = build_trace(
         (_scene((100, 100)),),
         rate_per_s=5.0,
-        duration_s=3.0,
+        n=3,
         window_size=10,
         band_names=("red",),
         target_epsg=3857,
@@ -50,7 +50,7 @@ def test_build_trace_samples_windows_in_bounds():
         tile_size=2,
         seed=0,
     )
-    assert entries
+    assert len(entries) == 3
     for entry in entries:
         row_off, col_off, height, width = entry.request.window
         assert (height, width) == (10, 10)

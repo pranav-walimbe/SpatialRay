@@ -111,7 +111,7 @@ def _render_bootstrap(cfg, run_id, hardware, model):
         "@@REPO_BRANCH@@": cfg["repo_branch"],
         "@@MODEL@@": model,
         "@@HARDWARE@@": hardware,
-        "@@MAX_RUNTIME_MIN@@": str(cfg["max_runtime_min"]),
+        "@@MAX_RUNTIME_MIN@@": str(cfg["max_runtime_mins"]),
     }
     script = _BOOTSTRAP.read_text()
     for key, value in replacements.items():
@@ -124,7 +124,7 @@ def _wait_for_success(s3, cfg, run_id):
     bucket = cfg["result_bucket"]
     success_key = f"{_RESULT_PREFIX}/{run_id}/_SUCCESS"
     progress_key = f"{_RESULT_PREFIX}/{run_id}/progress.log"
-    deadline = time.monotonic() + (cfg["max_runtime_min"] + 10) * 60
+    deadline = time.monotonic() + (cfg["max_runtime_mins"] + 10) * 60
     seen = 0
     while time.monotonic() < deadline:
         seen = _emit_progress(s3, bucket, progress_key, seen)

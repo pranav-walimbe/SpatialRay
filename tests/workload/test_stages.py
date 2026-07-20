@@ -9,7 +9,8 @@ from affine import Affine
 from rasterio.windows import Window
 
 from spatial_ray.workload.metadata import BandProfile, RasterPayload, RasterRequest, SceneRef
-from spatial_ray.workload.stages import _align_to_blocks, normalize, reproject_stage, tile
+from spatial_ray.workload.stages import normalize, reproject_stage, tile
+from spatial_ray.workload.stages.decode import _align_to_blocks
 
 
 def _band(

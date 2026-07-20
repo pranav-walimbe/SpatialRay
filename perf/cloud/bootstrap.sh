@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# User-data for an unattended SpatialRay perf run on an AL2023 (cpu) or Deep Learning (gpu) box.
-# Builds SpatialRay, runs the on-box subprocess-per-stage measurement over public Sentinel-2
-# COGs, captures its summary to result.txt, uploads it, then writes _SUCCESS. The EXIT trap
-# always ships the log and shuts the box down, and the launch terminates on shutdown. @@NAME@@
-# placeholders are substituted before deployment. No AWS keys are injected (instance role).
+# Builds SpatialRay, runs the on-box concurrent load-test harness over public Sentinel-2 COGs,
+# captures its summary to result.txt.
 
 set -uo pipefail
 
-# Cloud-init runs this with no HOME set; under `set -u` any $HOME use aborts the
-# run (e.g. sourcing the uv env below). Pin it before anything reads it.
 export HOME=/root
 
 RUN_ID="@@RUN_ID@@"
@@ -55,8 +50,7 @@ log "installing uv"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
 
-# Amazon Linux 2023 ships Python 3.9, below the project floor, so pin uv to a managed
-# 3.11 for every sync and run. It is above the supported floor, so the box exercises it.
+# Pin uv to a managed 3.11 for every sync and run
 export UV_PYTHON=3.11
 
 log "cloning ${REPO_URL} @ ${REPO_BRANCH}"
@@ -65,8 +59,6 @@ cd /opt/spatialray
 
 log "building SpatialRay"
 
-# The perf extra pulls ray[serve] and torch. On the Deep Learning gpu box the standard linux
-# torch wheel is CUDA-enabled against the preinstalled NVIDIA driver.
 uv venv
 uv pip install -e '.[perf]'
 
@@ -75,7 +67,6 @@ mkdir -p /data/scratch
 # /tmp is tmpfs (RAM) on these AMIs, so spill the per-stage scratch to the EBS data volume
 export TMPDIR=/data/scratch
 
-# rasterio /vsis3 and the aws CLI pick up IMDS credentials automatically once the region is set
 export AWS_DEFAULT_REGION="$REGION"
 log "measuring model=${MODEL} hardware=${HARDWARE}"
 

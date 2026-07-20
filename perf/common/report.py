@@ -1,96 +1,61 @@
 """
-Aggregates per-request stage measurements into a per-stage time and memory characterization.
+Stats types and a renderer for the concurrent load-test harness's per-stage and whole-run metrics.
 """
 
 from __future__ import annotations
 
-import statistics
-from collections.abc import Sequence
 from dataclasses import dataclass
-
-from perf.common.measure import RequestMeasurement
 
 _BYTES_PER_MIB = 1024 * 1024
 
 
 @dataclass(frozen=True)
-class StageStats:
+class StageLoadStats:
     name: str  # stage name
-    mean_wall_s: float  # mean wall-clock across requests
-    mean_rss_b: float  # mean subprocess peak RSS across requests, in bytes
-    mean_vram_b: float  # mean peak CUDA memory across requests, in bytes
-    wall_share: float  # this stage's share of total wall-clock
     device: str  # device the stage ran on, cpu or cuda
+    n_requests: int  # requests this stage processed
+    throughput_req_s: float  # requests completed per second over the stage's active wall time
+    throughput_tiles_s: float | None  # tiles produced per second, None where tiles don't apply
+    latency_mean_ms: float  # mean per-request stage latency
+    latency_median_ms: float  # p50 per-request stage latency
+    latency_p99_ms: float  # p99 per-request stage latency
+    peak_rss_b: int  # peak resident set size of the stage process, in bytes
 
 
 @dataclass(frozen=True)
-class Summary:
-    n_requests: int  # number of requests measured
-    mean_tiles: float  # mean tiles produced per request
-    mean_total_wall_s: float  # mean total wall-clock per request
-    stages: tuple[StageStats, ...]  # per-stage statistics in execution order
+class RunStats:
+    n_requests: int  # requests fed into the run
+    wall_s: float  # total wall-clock of the run
+    cpu_util_mean: float  # mean system CPU utilization percent over the run
+    cpu_util_peak: float  # peak system CPU utilization percent sampled during the run
+    gpu_util_mean: float | None  # mean GPU utilization percent, None on cpu hardware
+    gpu_util_peak: float | None  # peak GPU utilization percent, None on cpu hardware
+    stages: tuple[StageLoadStats, ...]  # per-stage stats in pipeline order
 
 
-def summarize(measurements: Sequence[RequestMeasurement]) -> Summary:
-    """Aggregate per-request measurements into per-stage means and wall-clock shares.
-
-    Args:
-        measurements: Per-request measurement records from a substrate run.
-
-    Returns:
-        A characterization of measured per-stage and total cost.
-    """
-    stage_names = tuple(stage.name for stage in measurements[0].stages)
-    count = len(stage_names)
-    mean_wall = [statistics.fmean(m.stages[i].wall_s for m in measurements) for i in range(count)]
-    mean_rss = [
-        statistics.fmean(m.stages[i].rss_peak_b for m in measurements) for i in range(count)
-    ]
-    mean_vram = [
-        statistics.fmean(m.stages[i].vram_peak_b for m in measurements) for i in range(count)
-    ]
-    total_wall = sum(mean_wall)
-    devices = [measurements[0].stages[i].device for i in range(count)]
-    stages = tuple(
-        StageStats(
-            name=name,
-            mean_wall_s=wall,
-            mean_rss_b=rss,
-            mean_vram_b=vram,
-            wall_share=wall / total_wall if total_wall else 0.0,
-            device=device,
-        )
-        for name, wall, rss, vram, device in zip(
-            stage_names, mean_wall, mean_rss, mean_vram, devices
-        )
-    )
-    return Summary(
-        n_requests=len(measurements),
-        mean_tiles=statistics.fmean(m.n_tiles for m in measurements),
-        mean_total_wall_s=total_wall,
-        stages=stages,
-    )
-
-
-def format_summary(summary: Summary) -> str:
-    """Render a characterization summary as a human-readable per-stage table.
+def format_run_summary(run: RunStats) -> str:
+    """Render a run's whole-run utilization and per-stage stats as a human-readable report.
 
     Args:
-        summary: Aggregated characterization to render.
+        run: Aggregated load-test run stats to render.
 
     Returns:
-        A multi-line string with per-stage time, memory, shares, and the request total.
+        A multi-line string with whole-run utilization and a per-stage stats table.
     """
     lines = [
-        f"requests: {summary.n_requests}   mean tiles/request: {summary.mean_tiles:.1f}",
-        "per-stage mean cost:",
+        f"requests: {run.n_requests}   wall: {run.wall_s:.1f} s",
+        f"cpu util: mean {run.cpu_util_mean:.1f}%   peak {run.cpu_util_peak:.1f}%",
     ]
-    for stage in summary.stages:
-        vram = "-" if stage.mean_vram_b <= 0 else f"{stage.mean_vram_b / _BYTES_PER_MIB:.1f}"
+    if run.gpu_util_mean is not None:
+        lines.append(f"gpu util: mean {run.gpu_util_mean:.1f}%   peak {run.gpu_util_peak:.1f}%")
+    lines.append("per-stage:")
+    for stage in run.stages:
+        tiles = "-" if stage.throughput_tiles_s is None else f"{stage.throughput_tiles_s:.1f}"
         lines.append(
-            f"  {stage.name:<16} {stage.mean_wall_s * 1e3:8.1f} ms   "
-            f"{stage.mean_rss_b / _BYTES_PER_MIB:7.1f} MiB peak  "
-            f"{vram:>8} MiB vram   {stage.wall_share:5.1%}   {stage.device}"
+            f"  {stage.name:<10} {stage.n_requests:5d} reqs   "
+            f"{stage.throughput_req_s:6.2f} req/s   {tiles:>8} tiles/s   "
+            f"latency mean {stage.latency_mean_ms:7.1f} ms  "
+            f"p50 {stage.latency_median_ms:7.1f} ms  p99 {stage.latency_p99_ms:7.1f} ms   "
+            f"peak {stage.peak_rss_b / _BYTES_PER_MIB:7.1f} MiB   {stage.device}"
         )
-    lines.append(f"total: {summary.mean_total_wall_s * 1e3:.1f} ms/request")
     return "\n".join(lines)
