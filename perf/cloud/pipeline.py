@@ -61,6 +61,7 @@ def _measure_request(request, *, model, hardware, scratch, index):
                 wall_s=record["wall_s"],
                 rss_peak_b=record["rss_peak_b"],
                 vram_peak_b=record["vram_peak_b"],
+                device=record["device"],
             )
         )
         if record["n_tiles"] is not None:

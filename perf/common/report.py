@@ -20,6 +20,7 @@ class StageStats:
     mean_rss_b: float  # mean subprocess peak RSS across requests, in bytes
     mean_vram_b: float  # mean peak CUDA memory across requests, in bytes
     wall_share: float  # this stage's share of total wall-clock
+    device: str  # device the stage ran on, cpu or cuda
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def summarize(measurements: Sequence[RequestMeasurement]) -> Summary:
         statistics.fmean(m.stages[i].vram_peak_b for m in measurements) for i in range(count)
     ]
     total_wall = sum(mean_wall)
+    devices = [measurements[0].stages[i].device for i in range(count)]
     stages = tuple(
         StageStats(
             name=name,
@@ -56,8 +58,11 @@ def summarize(measurements: Sequence[RequestMeasurement]) -> Summary:
             mean_rss_b=rss,
             mean_vram_b=vram,
             wall_share=wall / total_wall if total_wall else 0.0,
+            device=device,
         )
-        for name, wall, rss, vram in zip(stage_names, mean_wall, mean_rss, mean_vram)
+        for name, wall, rss, vram, device in zip(
+            stage_names, mean_wall, mean_rss, mean_vram, devices
+        )
     )
     return Summary(
         n_requests=len(measurements),
@@ -85,7 +90,7 @@ def format_summary(summary: Summary) -> str:
         lines.append(
             f"  {stage.name:<16} {stage.mean_wall_s * 1e3:8.1f} ms   "
             f"{stage.mean_rss_b / _BYTES_PER_MIB:7.1f} MiB peak  "
-            f"{vram:>8} MiB vram   {stage.wall_share:5.1%}"
+            f"{vram:>8} MiB vram   {stage.wall_share:5.1%}   {stage.device}"
         )
     lines.append(f"total: {summary.mean_total_wall_s * 1e3:.1f} ms/request")
     return "\n".join(lines)

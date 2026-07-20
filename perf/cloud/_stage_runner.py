@@ -44,6 +44,7 @@ def main() -> None:
                 "wall_s": measurement.wall_s,
                 "rss_peak_b": measurement.rss_peak_b,
                 "vram_peak_b": measurement.vram_peak_b,
+                "device": measurement.device,
                 "n_tiles": n_tiles,
             }
         )
@@ -67,9 +68,11 @@ def _run_inference(payload, model_name, hardware):
 
     from perf.common.models import load
 
+    if hardware == "gpu" and not torch.cuda.is_available():
+        raise RuntimeError("hardware=gpu requested but torch.cuda.is_available() is False")
     model = load(model_name).build()
     tiles = payload.tiles
-    on_gpu = hardware == "gpu" and torch.cuda.is_available()
+    on_gpu = hardware == "gpu"
     if on_gpu:
         torch.cuda.reset_peak_memory_stats()
     start = time.perf_counter()
@@ -78,7 +81,11 @@ def _run_inference(payload, model_name, hardware):
     rss_peak = peak_rss_bytes()
     vram = int(torch.cuda.max_memory_allocated()) if on_gpu else 0
     measurement = StageMeasurement(
-        name=INFERENCE_STAGE, wall_s=wall_s, rss_peak_b=rss_peak, vram_peak_b=vram
+        name=INFERENCE_STAGE,
+        wall_s=wall_s,
+        rss_peak_b=rss_peak,
+        vram_peak_b=vram,
+        device="cuda" if on_gpu else "cpu",
     )
     return measurement, int(tiles.shape[0])
 

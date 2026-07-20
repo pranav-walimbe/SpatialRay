@@ -18,6 +18,7 @@ class StageMeasurement:
     wall_s: float  # wall-clock seconds spent in the stage
     rss_peak_b: int  # peak resident set size of the stage subprocess, in bytes
     vram_peak_b: int  # peak CUDA memory during the stage in bytes, 0 when not on gpu
+    device: str = "cpu"  # device the stage actually ran on, cpu or cuda
 
 
 @dataclass(frozen=True)
