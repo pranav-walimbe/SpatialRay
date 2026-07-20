@@ -11,7 +11,7 @@ instance_profile: spatialray-perf
 region: us-west-2
 cpu_instance_type: m7i.xlarge
 gpu_instance_type: g4dn.xlarge
-volume_gb: 50
+volume_gb: 80
 max_runtime_min: 30
 
 # AMIs resolved via SSM: AL2023 for cpu, a driver-only Deep Learning AMI supporting G4dn for gpu
