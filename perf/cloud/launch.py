@@ -49,7 +49,7 @@ def main() -> None:
     instance_ids = _launch_cluster(ec2, ssm, cfg, run_id, args)
     print(f"launched {len(instance_ids)} nodes ({args.hardware}) run {run_id}: {instance_ids}")
     try:
-        _wait_for_success(s3, cfg, run_id)
+        _wait_for_success(s3, ec2, cfg, run_id, instance_ids)
         _download(s3, cfg, run_id, "result.png", figure_path)
         print(f"wrote {figure_path}")
     finally:
@@ -144,8 +144,8 @@ def _render_bootstrap(cfg, run_id, args, role, is_head, expected_nodes):
     return script
 
 
-def _wait_for_success(s3, cfg, run_id):
-    # Poll the run's _SUCCESS marker while streaming progress until it appears or times out
+def _wait_for_success(s3, ec2, cfg, run_id, instance_ids):
+    # Poll for the _SUCCESS marker while streaming progress and abort if a node dies first
     bucket = cfg["result_bucket"]
     success_key = f"{_RESULT_PREFIX}/{run_id}/_SUCCESS"
     progress_key = f"{_RESULT_PREFIX}/{run_id}/progress.log"
@@ -155,8 +155,22 @@ def _wait_for_success(s3, cfg, run_id):
         seen = _emit_progress(s3, bucket, progress_key, seen)
         if _exists(s3, bucket, success_key):
             return
+        dead = _dead_nodes(ec2, instance_ids)
+        if dead:
+            raise RuntimeError(f"run {run_id} aborted: nodes terminated before success: {dead}")
         time.sleep(_POLL_SECONDS)
     raise TimeoutError(f"run {run_id} did not finish within the deadline")
+
+
+def _dead_nodes(ec2, instance_ids):
+    # Instance ids no longer pending or running, a node that died before writing _SUCCESS
+    reservations = ec2.describe_instances(InstanceIds=instance_ids)["Reservations"]
+    return [
+        instance["InstanceId"]
+        for reservation in reservations
+        for instance in reservation["Instances"]
+        if instance["State"]["Name"] not in ("pending", "running")
+    ]
 
 
 def _emit_progress(s3, bucket, key, seen):

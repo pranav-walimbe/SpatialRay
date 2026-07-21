@@ -24,20 +24,22 @@ S3_BASE="s3://${RESULT_BUCKET}/${RESULT_PREFIX}/${RUN_ID}"
 HEAD_KEY="${S3_BASE}/head_ip"
 FIGURE=/data/result.png
 LOG=/var/log/spatialray-bootstrap.log
+
+# the head streams to progress.log for the launcher and each worker streams to its own key
+if [ "$IS_HEAD" = "1" ]; then STREAM_KEY="${S3_BASE}/progress.log"; else STREAM_KEY="${S3_BASE}/log-${ROLE}.log"; fi
+
 exec > >(tee -a "$LOG") 2>&1
 log() { echo "[bootstrap $ROLE] $*"; }
 
-# ship this node's log and self-terminate whether we succeed or fail
-cleanup() { aws s3 cp "$LOG" "${S3_BASE}/bootstrap-${ROLE}.log" --region "$REGION" || true; shutdown -h now; }
-trap cleanup EXIT
+# flush this node's log to S3 and self-terminate on exit or when systemd sends SIGTERM
+cleanup() { aws s3 cp "$LOG" "$STREAM_KEY" --region "$REGION" || true; shutdown -h now; }
+trap cleanup EXIT TERM
 
 # hard cap terminate even if a step wedges
 ( sleep $((MAX_RUNTIME_MIN * 60)); log "watchdog timeout"; shutdown -h now ) &
 
-# the head streams its log to S3 every 15s so the launcher can show progress
-if [ "$IS_HEAD" = "1" ]; then
-  ( while true; do aws s3 cp "$LOG" "${S3_BASE}/progress.log" --region "$REGION" >/dev/null 2>&1 || true; sleep 15; done ) &
-fi
+# every node streams its log to S3 every 15s so each node is watchable live
+( while true; do aws s3 cp "$LOG" "$STREAM_KEY" --region "$REGION" >/dev/null 2>&1 || true; sleep 15; done ) &
 
 set -e
 
