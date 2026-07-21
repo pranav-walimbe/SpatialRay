@@ -25,6 +25,7 @@ class PoolSpec:
     max_ongoing_requests: int | None = None  # per-replica request cap, None keeps Serve's default
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling, overrides num_replicas
+    work_unit: str | None = None  # work-in-flight gauge unit, "bytes" or "tiles", None disables it
 
 
 @dataclass(frozen=True)
@@ -35,11 +36,12 @@ class InferenceSpec:
     max_ongoing_requests: int | None = None  # per-replica request cap, None keeps Serve's default
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling, overrides num_replicas
+    work_unit: str | None = "tiles"  # work-in-flight gauge unit, None disables it
 
 
 DISAGGREGATED: tuple[PoolSpec, ...] = (
-    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=64),
-    PoolSpec(name="transform", stages=(reproject_stage, normalize, tile)),
+    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=64, work_unit="bytes"),
+    PoolSpec(name="transform", stages=(reproject_stage, normalize, tile), work_unit="tiles"),
 )
 
 
@@ -82,12 +84,14 @@ def build_graph(
         The bound ingress application ready for serve.run or the serve run CLI.
     """
     pools = [
-        serve.deployment(StagePool).options(**deployment_options(spec)).bind(spec.stages)
+        serve.deployment(StagePool)
+        .options(**deployment_options(spec))
+        .bind(spec.stages, spec.work_unit)
         for spec in grouping
     ]
     inference_pool = (
         serve.deployment(InferencePool)
         .options(**deployment_options(inference))
-        .bind(inference.model_factory)
+        .bind(inference.model_factory, inference.work_unit)
     )
     return serve.deployment(Ingress).options(name="ingress").bind(pools, inference_pool)

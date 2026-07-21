@@ -1,23 +1,43 @@
-# SpatialRay perf cloud runner configuration.
-# These values are substituted into bootstrap.sh before deployment as @@NAME@@ placeholders.
+# SpatialRay perf cloud runner configuration
+# substituted into bootstrap.sh as @@NAME@@ placeholders
 
-# required: S3 bucket to write result.txt and the _SUCCESS marker into
+# S3 bucket for result.png and the _SUCCESS marker
 result_bucket: spatialray-bench-results
 
-# required: IAM instance profile the box assumes (read public S3 data + write result bucket)
+# IAM instance profile granting S3 read and result-bucket write
 instance_profile: spatialray-perf
 
-# run
 region: us-west-2
-cpu_instance_type: m7i.xlarge
-gpu_instance_type: g4dn.xlarge
 volume_gb: 80
 max_runtime_mins: 30
 
-# AMIs resolved via SSM: AL2023 for cpu, a driver-only Deep Learning AMI supporting G4dn for gpu
+repo_url: https://github.com/pranav-walimbe/SpatialRay.git
+repo_branch: main
+
+# SSM AMI paths for the cpu and gpu nodes
 cpu_ami_ssm: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 gpu_ami_ssm: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id
 
-# source repo the box builds
-repo_url: https://github.com/pranav-walimbe/SpatialRay.git
-repo_branch: main
+# disaggregated Serve cluster one node per stage read by launcher and harness
+pools:
+  decode:
+    instance_type: c6i.xlarge
+    ami_ssm: cpu_ami_ssm
+    replicas: 3
+    num_cpus: 1
+  transform:
+    instance_type: c6i.2xlarge
+    ami_ssm: cpu_ami_ssm
+    replicas: 2
+    num_cpus: 2
+  inference:
+    replicas: 1
+    cpu:
+      instance_type: m7i.xlarge
+      ami_ssm: cpu_ami_ssm
+      num_cpus: 1
+    gpu:
+      instance_type: g4dn.xlarge
+      ami_ssm: gpu_ami_ssm
+      num_cpus: 1
+      num_gpus: 1

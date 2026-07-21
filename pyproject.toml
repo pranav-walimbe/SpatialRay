@@ -38,6 +38,8 @@ perf = [
     "einops>=0.7",
     "psutil>=5.9",
     "nvidia-ml-py>=12",
+    "matplotlib>=3.7",
+    "pyyaml>=6",
 ]
 cloud = [
     "boto3>=1.34",
