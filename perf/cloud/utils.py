@@ -63,14 +63,20 @@ def save_text_report(report: Report, path) -> None:
         path: Destination path for the text file.
     """
     throughput = report.n_requests / report.wall_s if report.wall_s else 0.0
+    title = "SpatialRay perf report"
+    bar = "═" * (len(title) + 4)
     lines = [
-        "=== SpatialRay perf report ===",
-        f"model         {report.model_name}",
-        f"hardware      {report.hardware}",
-        f"requests      {report.n_requests}",
-        f"wall_s        {report.wall_s:.2f}",
-        f"throughput    {throughput:.2f} req/s",
-        f"samples       {len(report.samples)}",
+        bar,
+        f"  {title}",
+        bar,
+        "",
+        f"  model        {report.model_name}",
+        f"  hardware     {report.hardware}",
+        f"  requests     {report.n_requests}",
+        f"  rate         {report.rate_per_s:.2f} req/s driven",
+        f"  throughput   {throughput:.2f} req/s achieved",
+        f"  wall         {report.wall_s:.2f} s",
+        f"  samples      {len(report.samples)}",
         "",
     ]
     # per-deployment latency straight from the Serve histogram
@@ -85,9 +91,9 @@ def save_text_report(report: Report, path) -> None:
         for deployment, stats in sorted(report.latency.items())
     ]
     lines += _section(
-        "per-stage latency (ms)", ("deployment", "n", "mean_ms", "p50_ms", "p99_ms"), latency_rows
+        "Per-stage latency (ms)", ("deployment", "n", "mean_ms", "p50_ms", "p99_ms"), latency_rows
     )
-    lines += _reduced_section("cpu utilization (%)", report, "node_cpu", report.roles)
+    lines += _reduced_section("CPU utilization (%)", report, "node_cpu", report.roles)
 
     # per-node gpu utilization alongside the vram it used
     gpu_rows = []
@@ -100,12 +106,12 @@ def save_text_report(report: Report, path) -> None:
         vram_cells = (f"{vram[0]:.2f}", f"{vram[1]:.2f}") if vram else ("-", "-")
         gpu_rows.append((report.roles.get(ip, ip), *util_cells, *vram_cells))
     lines += _section(
-        "gpu utilization (%) / vram (GiB)",
+        "GPU utilization (%) / VRAM (GiB)",
         ("node", "util_mean", "util_peak", "vram_mean", "vram_peak"),
         gpu_rows,
     )
-    lines += _reduced_section("node memory (GiB)", report, "node_mem", report.roles, _GIB)
-    lines += _reduced_section("queue depth (requests)", report, "queue", None)
+    lines += _reduced_section("Node memory (GiB)", report, "node_mem", report.roles, _GIB)
+    lines += _reduced_section("Queue depth (requests)", report, "queue", None)
 
     # per-pool work in flight labeled by unit with bytes pools reduced to MiB
     work_rows = []
@@ -116,9 +122,9 @@ def save_text_report(report: Report, path) -> None:
             continue
         display_unit = "MiB" if unit == "bytes" else unit
         work_rows.append((deployment, display_unit, f"{stats[0]:.2f}", f"{stats[1]:.2f}"))
-    lines += _section("work in flight", ("pool", "unit", "mean", "peak"), work_rows)
+    lines += _section("Work in flight", ("pool", "unit", "mean", "peak"), work_rows)
 
-    Path(path).write_text("\n".join(lines) + "\n")
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _reduced_section(title, report, field, roles, scale=1.0):
@@ -134,15 +140,24 @@ def _reduced_section(title, report, field, roles, scale=1.0):
 
 
 def _section(title, header, rows):
-    # a titled block wrapping an aligned table or its no-data placeholder
+    # a titled block wrapping a bordered table with left-aligned labels and right-aligned numbers
     if not rows:
-        return [f"--- {title} ---", "no data", ""]
+        return [title, "  (no data)", ""]
     columns = [header, *rows]
     widths = [max(len(row[i]) for row in columns) for i in range(len(header))]
-    aligned = [
-        "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip() for row in columns
-    ]
-    return [f"--- {title} ---", *aligned, ""]
+
+    def to_line(cells):
+        inner = "│".join(
+            f" {cell.ljust(widths[i]) if i == 0 else cell.rjust(widths[i])} "
+            for i, cell in enumerate(cells)
+        )
+        return f"│{inner}│"
+
+    seg = ["─" * (width + 2) for width in widths]
+    top = "┌" + "┬".join(seg) + "┐"
+    mid = "├" + "┼".join(seg) + "┤"
+    bottom = "└" + "┴".join(seg) + "┘"
+    return [title, top, to_line(header), mid, *(to_line(row) for row in rows), bottom, ""]
 
 
 def _reduce(samples, field, key, scale=1.0):

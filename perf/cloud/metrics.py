@@ -145,26 +145,6 @@ def deployment_latency(texts: list[str]) -> dict[str, dict]:
     return stats
 
 
-def work_units(texts: list[str]) -> dict[str, str]:
-    """Read each deployment's work-unit label off the work-in-flight gauge.
-
-    Args:
-        texts: Per-node Prometheus exposition documents scraped from the cluster.
-
-    Returns:
-        Deployment name to its work-unit label, bytes or tiles.
-    """
-    units = {}
-    for family in _families(texts):
-        if family.name != _WORK:
-            continue
-        for sample in family.samples:
-            deployment = sample.labels.get("deployment")
-            if deployment is not None and "work_unit" in sample.labels:
-                units[deployment] = sample.labels["work_unit"]
-    return units
-
-
 def _families(texts):
     # Yield metric families from each node's document so no two documents are concatenated
     for text in texts:

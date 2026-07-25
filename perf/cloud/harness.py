@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import threading
 import time
 from dataclasses import dataclass
 
@@ -20,7 +19,6 @@ from perf.cloud.metrics import (
     node_roles,
     parse_snapshot,
     scrape,
-    work_units,
 )
 from perf.cloud.utils import load_config
 from perf.common.models import load
@@ -35,6 +33,7 @@ class Report:
     model_name: str  # model module the inference pool served
     hardware: str  # cpu or gpu inference target
     n_requests: int  # requests the trace drove through the graph
+    rate_per_s: float  # mean Poisson arrival rate the trace was driven at
     wall_s: float  # total wall-clock of the run
     samples: tuple[Snapshot, ...]  # metrics snapshots sampled across the run
     latency: dict[str, dict]  # deployment to its cumulative latency stats
@@ -57,28 +56,18 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
     pools_cfg = load_config()["pools"]
     model = load(model_name)
     trace = build_default_trace(model, n=n_requests, rate_per_s=rate_per_s)
-    app = build_graph(
-        _sized_pools(pools_cfg),
-        inference=_inference_spec(pools_cfg, model_name, hardware),
-    )
+    pools = _sized_pools(pools_cfg)
+    inference = _inference_spec(pools_cfg, model_name, hardware)
+    app = build_graph(pools, inference=inference)
     ray.init(ignore_reinit_error=True)
     try:
         handle = serve.run(app)
         endpoints = metrics_endpoints()
         roles = node_roles()
-        stop = threading.Event()
         samples: list[Snapshot] = []
-        start = time.perf_counter()
-        sampler = threading.Thread(
-            target=_sample_loop, args=(stop, endpoints, samples, start), daemon=True
-        )
-        sampler.start()
-        wall_s = asyncio.run(_drive(handle, trace))
-        stop.set()
-        sampler.join()
+        wall_s = asyncio.run(_run_load(handle, trace, endpoints, samples))
         final = scrape(endpoints)
         latency = deployment_latency(final)
-        units = work_units(final)
     finally:
         serve.shutdown()
         ray.shutdown()
@@ -87,11 +76,12 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         model_name=model_name,
         hardware=hardware,
         n_requests=len(trace),
+        rate_per_s=rate_per_s,
         wall_s=wall_s,
         samples=tuple(samples),
         latency=latency,
         roles=roles,
-        work_units=units,
+        work_units=_work_units(pools, inference),
     )
 
 
@@ -122,6 +112,14 @@ def _inference_spec(pools_cfg, model_name, hardware):
     )
 
 
+def _work_units(pools, inference):
+    # map each deployment to its work-in-flight unit from the spec rather than the metric label
+    units = {spec.name: spec.work_unit for spec in pools if spec.work_unit}
+    if inference.work_unit:
+        units[inference.name] = inference.work_unit
+    return units
+
+
 def _model_factory(model_name):
     # Zero-arg factory that Serve cloudpickles to rebuild the model on each inference replica
     def build():
@@ -130,20 +128,38 @@ def _model_factory(model_name):
     return build
 
 
-def _sample_loop(stop, endpoints, samples, start):
-    # scrape a snapshot each interval, skipping any failed tick so one bad scrape cannot kill it
-    while not stop.is_set():
+async def _run_load(handle, trace, endpoints, samples):
+    # pace the trace with an async sampler ticking in the same loop
+    start = time.perf_counter()
+    sampler = asyncio.create_task(_sampler(endpoints, samples, start))
+    try:
+        await _drive(handle, trace, start)
+    finally:
+        sampler.cancel()
         try:
-            samples.append(parse_snapshot(scrape(endpoints), time.perf_counter() - start))
+            await sampler
+        except asyncio.CancelledError:
+            pass
+    return time.perf_counter() - start
+
+
+async def _sampler(endpoints, samples, start):
+    # scrape each interval off the event loop to keep pacing responsive
+    while True:
+        try:
+            samples.append(await asyncio.to_thread(_take_snapshot, endpoints, start))
         except Exception as error:
             print(f"metrics sample skipped: {error}")
-        stop.wait(_SAMPLE_INTERVAL_S)
+        await asyncio.sleep(_SAMPLE_INTERVAL_S)
 
 
-async def _drive(handle, trace):
-    # Fire each request at its trace arrival time and await every response before returning
-    start = time.perf_counter()
+def _take_snapshot(endpoints, start):
+    # blocking scrape and parse stamped with elapsed run time
+    return parse_snapshot(scrape(endpoints), time.perf_counter() - start)
 
+
+async def _drive(handle, trace, start):
+    # fire each request at its arrival time and await every response
     async def _fire(entry):
         delay = (start + entry.arrival_s) - time.perf_counter()
         if delay > 0:
@@ -151,4 +167,3 @@ async def _drive(handle, trace):
         await handle.remote(entry.request)
 
     await asyncio.gather(*(asyncio.create_task(_fire(entry)) for entry in trace))
-    return time.perf_counter() - start
