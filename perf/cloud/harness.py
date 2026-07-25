@@ -131,9 +131,12 @@ def _model_factory(model_name):
 
 
 def _sample_loop(stop, endpoints, samples, start):
-    # Scrape and parse a metrics snapshot every interval until told to stop
+    # scrape a snapshot each interval, skipping any failed tick so one bad scrape cannot kill it
     while not stop.is_set():
-        samples.append(parse_snapshot(scrape(endpoints), time.perf_counter() - start))
+        try:
+            samples.append(parse_snapshot(scrape(endpoints), time.perf_counter() - start))
+        except Exception as error:
+            print(f"metrics sample skipped: {error}")
         stop.wait(_SAMPLE_INTERVAL_S)
 
 

@@ -60,30 +60,30 @@ def node_roles() -> dict[str, str]:
     return roles
 
 
-def scrape(endpoints: list[str]) -> str:
-    """Fetch and concatenate the Prometheus exposition text from each endpoint.
+def scrape(endpoints: list[str]) -> list[str]:
+    """Fetch the Prometheus exposition text from each reachable endpoint.
 
     Args:
         endpoints: Node /metrics URLs to scrape, unreachable ones are skipped.
 
     Returns:
-        The concatenated exposition text across all reachable endpoints.
+        One exposition document per reachable endpoint, kept separate so each parses on its own.
     """
-    chunks = []
+    texts = []
     for url in endpoints:
         try:
             with urllib.request.urlopen(url, timeout=_SCRAPE_TIMEOUT_S) as response:
-                chunks.append(response.read().decode())
+                texts.append(response.read().decode())
         except OSError:
             continue
-    return "\n".join(chunks)
+    return texts
 
 
-def parse_snapshot(text: str, t_s: float) -> Snapshot:
+def parse_snapshot(texts: list[str], t_s: float) -> Snapshot:
     """Reduce one scrape into a timestamped snapshot of the gauges we plot.
 
     Args:
-        text: Prometheus exposition text scraped from the cluster.
+        texts: Per-node Prometheus exposition documents scraped from the cluster.
         t_s: Seconds since the run started, stamped onto the snapshot.
 
     Returns:
@@ -92,7 +92,7 @@ def parse_snapshot(text: str, t_s: float) -> Snapshot:
     node_cpu, node_gpu, node_gram, node_mem = {}, {}, {}, {}
     work: dict[str, float] = defaultdict(float)
     queue: dict[str, float] = defaultdict(float)
-    for family in text_string_to_metric_families(text):
+    for family in _families(texts):
         if family.name == _NODE_CPU:
             _fill_by_ip(node_cpu, family.samples)
         elif family.name == _NODE_GPU:
@@ -108,11 +108,11 @@ def parse_snapshot(text: str, t_s: float) -> Snapshot:
     return Snapshot(t_s, node_cpu, node_gpu, node_gram, node_mem, dict(work), dict(queue))
 
 
-def deployment_latency(text: str) -> dict[str, dict]:
+def deployment_latency(texts: list[str]) -> dict[str, dict]:
     """Reduce the cumulative processing-latency histogram to per-deployment latency stats.
 
     Args:
-        text: Prometheus exposition text scraped from the cluster.
+        texts: Per-node Prometheus exposition documents scraped from the cluster.
 
     Returns:
         Deployment name to its request count, mean, p50, and p99 latency in ms.
@@ -120,7 +120,7 @@ def deployment_latency(text: str) -> dict[str, dict]:
     counts: dict[str, float] = defaultdict(float)
     sums: dict[str, float] = defaultdict(float)
     buckets: dict[str, dict[float, float]] = defaultdict(lambda: defaultdict(float))
-    for family in text_string_to_metric_families(text):
+    for family in _families(texts):
         if family.name != _LATENCY:
             continue
         for sample in family.samples:
@@ -145,17 +145,17 @@ def deployment_latency(text: str) -> dict[str, dict]:
     return stats
 
 
-def work_units(text: str) -> dict[str, str]:
+def work_units(texts: list[str]) -> dict[str, str]:
     """Read each deployment's work-unit label off the work-in-flight gauge.
 
     Args:
-        text: Prometheus exposition text scraped from the cluster.
+        texts: Per-node Prometheus exposition documents scraped from the cluster.
 
     Returns:
         Deployment name to its work-unit label, bytes or tiles.
     """
     units = {}
-    for family in text_string_to_metric_families(text):
+    for family in _families(texts):
         if family.name != _WORK:
             continue
         for sample in family.samples:
@@ -163,6 +163,12 @@ def work_units(text: str) -> dict[str, str]:
             if deployment is not None and "work_unit" in sample.labels:
                 units[deployment] = sample.labels["work_unit"]
     return units
+
+
+def _families(texts):
+    # Yield metric families from each node's document so no two documents are concatenated
+    for text in texts:
+        yield from text_string_to_metric_families(text)
 
 
 def _fill_by_ip(target, samples):

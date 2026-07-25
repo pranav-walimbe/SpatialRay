@@ -51,7 +51,9 @@ def main() -> None:
     try:
         _wait_for_success(s3, ec2, cfg, run_id, instance_ids)
         _download(s3, cfg, run_id, "result.png", figure_path)
+        _download(s3, cfg, run_id, "result.txt", figure_path.with_suffix(".txt"))
         print(f"wrote {figure_path}")
+        print(f"wrote {figure_path.with_suffix('.txt')}")
     finally:
         ec2.terminate_instances(InstanceIds=instance_ids)
         print(f"terminated {instance_ids}")

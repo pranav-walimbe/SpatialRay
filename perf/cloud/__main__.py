@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 
 from perf.cloud.harness import run
-from perf.cloud.utils import save_report
+from perf.cloud.utils import save_report, save_text_report
 from perf.common.models import DEFAULT_MODEL
 
 _ASSETS_DIR = Path(__file__).parents[2] / "assets"
@@ -43,8 +43,11 @@ def main() -> None:
     )
     out = Path(args.out) if args.out else _ASSETS_DIR / f"perf-{args.hardware}-{args.model}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
+    text_out = out.with_suffix(".txt")
     save_report(report, out)
+    save_text_report(report, text_out)
     print(f"wrote {out}")
+    print(f"wrote {text_out}")
 
 
 if __name__ == "__main__":
