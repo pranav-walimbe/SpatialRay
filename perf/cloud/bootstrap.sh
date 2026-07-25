@@ -22,7 +22,6 @@ EXPECTED_NODES="@@EXPECTED_NODES@@"
 
 S3_BASE="s3://${RESULT_BUCKET}/${RESULT_PREFIX}/${RUN_ID}"
 HEAD_KEY="${S3_BASE}/head_ip"
-FIGURE=/data/result.png
 REPORT=/data/result.txt
 LOG=/var/log/spatialray-bootstrap.log
 
@@ -94,10 +93,9 @@ PY
 
   log "running perf.cloud model=${MODEL} hardware=${HARDWARE} requests=${REQUESTS} rate=${RATE}"
   RAY_ADDRESS=auto python -m perf.cloud \
-    --model "$MODEL" --hardware "$HARDWARE" --requests "$REQUESTS" --rate "$RATE" --out "$FIGURE"
+    --model "$MODEL" --hardware "$HARDWARE" --requests "$REQUESTS" --rate "$RATE" --out "$REPORT"
 
   log "done"
-  aws s3 cp "$FIGURE" "${S3_BASE}/result.png" --region "$REGION"
   aws s3 cp "$REPORT" "${S3_BASE}/result.txt" --region "$REGION"
   aws s3 cp "$LOG" "${S3_BASE}/progress.log" --region "$REGION" || true
   echo ok | aws s3 cp - "${S3_BASE}/_SUCCESS" --region "$REGION"

@@ -1,5 +1,5 @@
 """
-Boots the disaggregated EC2 Ray cluster from config.yaml and collects the head's metrics figure.
+Boots the disaggregated EC2 Ray cluster from config.yaml and collects the head's text report.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ _POLL_SECONDS = 20
 
 
 def main() -> None:
-    """Boot the disaggregated cluster for the chosen hardware and fetch its metrics figure."""
+    """Boot the disaggregated cluster for the chosen hardware and fetch its text report."""
     parser = ArgumentParser(description="Boot an EC2 Ray cluster and run the perf measurement.")
     parser.add_argument(
         "--hardware", default="cpu", choices=("cpu", "gpu"), help="cpu or single-T4 inference node"
@@ -45,15 +45,13 @@ def main() -> None:
     ssm = boto3.client("ssm", region_name=region)
     s3 = boto3.client("s3", region_name=region)
 
-    figure_path = _ASSETS_DIR / f"perf-{args.hardware}-{args.model}.png"
+    report_path = _ASSETS_DIR / f"perf-{args.hardware}-{args.model}.txt"
     instance_ids = _launch_cluster(ec2, ssm, cfg, run_id, args)
     print(f"launched {len(instance_ids)} nodes ({args.hardware}) run {run_id}: {instance_ids}")
     try:
         _wait_for_success(s3, ec2, cfg, run_id, instance_ids)
-        _download(s3, cfg, run_id, "result.png", figure_path)
-        _download(s3, cfg, run_id, "result.txt", figure_path.with_suffix(".txt"))
-        print(f"wrote {figure_path}")
-        print(f"wrote {figure_path.with_suffix('.txt')}")
+        _download(s3, cfg, run_id, "result.txt", report_path)
+        print(f"wrote {report_path}")
     finally:
         ec2.terminate_instances(InstanceIds=instance_ids)
         print(f"terminated {instance_ids}")

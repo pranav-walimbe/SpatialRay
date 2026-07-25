@@ -1,7 +1,7 @@
 # SpatialRay perf cloud runner configuration
 # substituted into bootstrap.sh as @@NAME@@ placeholders
 
-# S3 bucket for result.png and the _SUCCESS marker
+# S3 bucket for result.txt and the _SUCCESS marker
 result_bucket: spatialray-bench-results
 
 # IAM instance profile granting S3 read and result-bucket write
