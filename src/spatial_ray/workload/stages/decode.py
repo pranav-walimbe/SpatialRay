@@ -5,7 +5,7 @@ Reads the request's AOI from each remote band COG, resampling to the reference g
 from __future__ import annotations
 
 import math
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import rasterio
@@ -30,7 +30,6 @@ _GDAL_ENV = {
 }
 
 _DECODE_NUM_WORKERS = 64  # shared IO thread pool width across all bands and blocks
-_DECODE_PREFETCH = 8  # block reads submitted per wave
 
 
 def _align_to_blocks(window: Window, block_shape: tuple[int, int]) -> Window:
@@ -120,13 +119,15 @@ def decode(payload: RasterPayload, pool: ThreadPoolExecutor | None = None) -> Ra
         owns_pool = pool is None
         active_pool = pool or ThreadPoolExecutor(max_workers=_DECODE_NUM_WORKERS)
         try:
-            for i in range(0, len(tasks), _DECODE_PREFETCH):
-                for name, offset, data in active_pool.map(_read, tasks[i : i + _DECODE_PREFETCH]):
-                    if offset is None:
-                        arrays[name] = data
-                    else:
-                        r0, c0 = offset
-                        arrays[name][r0 : r0 + data.shape[0], c0 : c0 + data.shape[1]] = data
+            # stream every touched block concurrently, bounded only by the pool width
+            futures = [active_pool.submit(_read, task) for task in tasks]
+            for future in as_completed(futures):
+                name, offset, data = future.result()
+                if offset is None:
+                    arrays[name] = data
+                else:
+                    r0, c0 = offset
+                    arrays[name][r0 : r0 + data.shape[0], c0 : c0 + data.shape[1]] = data
         finally:
             if owns_pool:
                 active_pool.shutdown()
