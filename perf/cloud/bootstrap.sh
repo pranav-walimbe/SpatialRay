@@ -64,6 +64,9 @@ log "building SpatialRay"
 uv venv
 uv pip install -e '.[perf]'
 
+# activate the venv so ray spawns its workers with this interpreter instead of re-invoking uv
+source /opt/spatialray/.venv/bin/activate
+
 mkdir -p /data/scratch
 # /tmp is tmpfs (RAM) on these AMIs so spill the per-stage scratch to the EBS data volume
 export TMPDIR=/data/scratch
@@ -76,11 +79,11 @@ RESOURCES="{\"${ROLE}_node\": 1}"
 
 if [ "$IS_HEAD" = "1" ]; then
   log "starting ray head at ${LOCAL_IP}"
-  uv run --no-sync ray start --head --node-ip-address="$LOCAL_IP" --port=6379 --resources="$RESOURCES"
+  ray start --head --node-ip-address="$LOCAL_IP" --port=6379 --resources="$RESOURCES"
   echo "$LOCAL_IP" | aws s3 cp - "$HEAD_KEY" --region "$REGION"
 
   log "waiting for ${EXPECTED_NODES} nodes to join"
-  RAY_ADDRESS=auto uv run --no-sync python - "$EXPECTED_NODES" <<'PY'
+  RAY_ADDRESS=auto python - "$EXPECTED_NODES" <<'PY'
 import sys, time, ray
 ray.init(address="auto")
 expected = int(sys.argv[1])
@@ -89,7 +92,7 @@ while len([n for n in ray.nodes() if n["alive"]]) < expected:
 PY
 
   log "running perf.cloud model=${MODEL} hardware=${HARDWARE} requests=${REQUESTS} rate=${RATE}"
-  RAY_ADDRESS=auto uv run --no-sync python -m perf.cloud \
+  RAY_ADDRESS=auto python -m perf.cloud \
     --model "$MODEL" --hardware "$HARDWARE" --requests "$REQUESTS" --rate "$RATE" --out "$FIGURE"
 
   log "done"
@@ -102,7 +105,7 @@ else
   HEAD_IP=$(cat /tmp/head_ip)
 
   log "joining ray head at ${HEAD_IP}"
-  uv run --no-sync ray start --address="${HEAD_IP}:6379" --node-ip-address="$LOCAL_IP" --resources="$RESOURCES"
+  ray start --address="${HEAD_IP}:6379" --node-ip-address="$LOCAL_IP" --resources="$RESOURCES"
 
   # hold the box up so its replicas keep serving until the launcher tears the cluster down
   log "joined, idling until terminated"
