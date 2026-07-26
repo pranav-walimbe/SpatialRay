@@ -20,13 +20,7 @@ test:
 
 ci: lint test
 
-perf-preprocess:
-	uv run python -m perf.preprocess
-
-perf-serve:
-	uv run --extra perf python -m perf.serve
-
-# terminate every non-terminated spatialray-perf instance across all regions
+# terminate all spatialray-perf instances
 clear-ec2:
 	@regions=$$(aws ec2 describe-regions --all-regions \
 	  --query "Regions[?OptInStatus!='not-opted-in'].RegionName" --output text); \

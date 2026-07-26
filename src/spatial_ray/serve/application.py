@@ -4,8 +4,8 @@ One pool grouping and inference spec rendered as both a bound graph and a matchi
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from spatial_ray.serve.graph import InferenceSpec, PoolSpec, build_graph
@@ -22,6 +22,7 @@ class Application:
     inference: InferenceSpec  # the inference pool spec
     import_path: str  # module path Ray re-imports to rebuild this graph, e.g. perf.cloud.app:app
     app_name: str = DEFAULT_APP_NAME  # name shared by the bound graph and the compiled config
+    ingress_options: Mapping[str, Any] = field(default_factory=dict)  # ingress Serve options
 
     @property
     def graph(self):
@@ -30,7 +31,9 @@ class Application:
         Returns:
             The bound ingress application ready for serve.run or the serve run CLI.
         """
-        return build_graph(self.grouping, inference=self.inference)
+        return build_graph(
+            self.grouping, inference=self.inference, ingress_options=self.ingress_options
+        )
 
     @property
     def serve_config(self) -> dict[str, Any]:

@@ -17,6 +17,7 @@ APP_NAME = "spatialray"
 _IMPORT_PATH = "perf.cloud.app:app"
 _HARDWARE_ENV = "SPATIALRAY_HARDWARE"
 _MODEL_ENV = "SPATIALRAY_MODEL"
+_INGRESS_NODE = "transform"  # cpu node the ingress replicas pin to
 
 
 def from_config(model_name: str = DEFAULT_MODEL, hardware: str = "cpu") -> Application:
@@ -32,7 +33,18 @@ def from_config(model_name: str = DEFAULT_MODEL, hardware: str = "cpu") -> Appli
     pools_cfg = load_config()["pools"]
     grouping = tuple(_sized_pool(spec, pools_cfg[spec.name]) for spec in DISAGGREGATED)
     inference = _inference_spec(pools_cfg, model_name, hardware)
-    return Application(grouping, inference, import_path=_IMPORT_PATH, app_name=APP_NAME)
+    return Application(
+        grouping,
+        inference,
+        import_path=_IMPORT_PATH,
+        app_name=APP_NAME,
+        ingress_options=_ingress_options(),
+    )
+
+
+def _ingress_options():
+    # pin the ingress replicas to a cpu node so they stay off the gpu inference box
+    return {"ray_actor_options": {"resources": {node_resource(_INGRESS_NODE): 0.01}}}
 
 
 def _sized_pool(spec, pool_cfg):

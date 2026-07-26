@@ -11,7 +11,7 @@ from contextlib import contextmanager, nullcontext
 
 from ray.serve import metrics
 
-from spatial_ray.serve.messages import Predictions, TileBatch
+from spatial_ray.serve.messages import Predictions
 from spatial_ray.workload.cost import decoded_bytes, predicted_tiles
 from spatial_ray.workload.metadata import RasterPayload, RasterRequest
 from spatial_ray.workload.profiler import Stage
@@ -138,18 +138,18 @@ class InferencePool:
             else None
         )
 
-    def infer(self, batch: TileBatch) -> Predictions:
-        """Run the model forward pass over a tile batch.
+    def infer(self, payload: RasterPayload) -> Predictions:
+        """Run the model forward pass over a payload's tiles.
 
         Args:
-            batch: Tile batch produced by the preprocessing pools.
+            payload: Payload with tiles set by the preprocessing pools.
 
         Returns:
-            Predictions carrying the model output for the batch.
+            Predictions carrying the model output for the payload.
         """
-        with self._work.track(batch) if self._work is not None else nullcontext():
-            array = self._model(batch.tiles)
-        return Predictions(request=batch.request, array=array)
+        with self._work.track(payload) if self._work is not None else nullcontext():
+            array = self._model(payload.tiles)
+        return Predictions(request=payload.request, array=array)
 
 
 class Ingress:
@@ -166,8 +166,7 @@ class Ingress:
         Returns:
             Predictions produced for the request.
         """
-        payload = RasterPayload(request=request)
-        for pool in self._pools:
-            payload = await pool.run.remote(payload)
-        batch = TileBatch(request=request, tiles=payload.tiles)
-        return await self._inference.infer.remote(batch)
+        response = self._pools[0].run.remote(RasterPayload(request=request))
+        for pool in self._pools[1:]:
+            response = pool.run.remote(response)
+        return await self._inference.infer.remote(response)

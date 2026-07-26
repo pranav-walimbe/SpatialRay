@@ -7,7 +7,6 @@ from __future__ import annotations
 import numpy as np
 
 from spatial_ray.serve.deployments import InferencePool, StagePool
-from spatial_ray.serve.messages import TileBatch
 from spatial_ray.workload.metadata import RasterPayload, RasterRequest, SceneRef
 
 
@@ -44,7 +43,8 @@ def test_stage_pool_order():
 def test_inference_pool():
     """InferencePool wraps the model output in Predictions."""
     pool = InferencePool(model_factory=lambda: lambda tiles: tiles.sum(axis=(1, 2, 3)))
-    batch = TileBatch(request=_payload().request, tiles=np.ones((3, 1, 2, 2), dtype=np.float32))
-    preds = pool.infer(batch)
+    payload = _payload()
+    payload.tiles = np.ones((3, 1, 2, 2), dtype=np.float32)
+    preds = pool.infer(payload)
     assert preds.array.shape == (3,)
-    assert preds.request is batch.request
+    assert preds.request is payload.request

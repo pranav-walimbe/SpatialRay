@@ -88,4 +88,5 @@ def tile(payload: RasterPayload) -> RasterPayload:
     crop = payload.array[:, : n_rows * size, : n_cols * size]
     grid = crop.reshape(bands, n_rows, size, n_cols, size)
     payload.tiles = grid.transpose(1, 3, 0, 2, 4).reshape(-1, bands, size, size)
+    payload.array = None
     return payload

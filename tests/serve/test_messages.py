@@ -8,7 +8,7 @@ import pickle
 
 import numpy as np
 
-from spatial_ray.serve.messages import Predictions, TileBatch
+from spatial_ray.serve.messages import Predictions
 from spatial_ray.workload.metadata import RasterRequest, SceneRef
 
 
@@ -26,13 +26,9 @@ def _request() -> RasterRequest:
 
 
 def test_messages_pickle_round_trip():
-    """TileBatch and Predictions survive a pickle round-trip."""
-    batch = pickle.loads(
-        pickle.dumps(TileBatch(request=_request(), tiles=np.zeros((3, 1, 2, 2), dtype=np.float32)))
-    )
+    """Predictions survives a pickle round-trip."""
     preds = pickle.loads(
         pickle.dumps(Predictions(request=_request(), array=np.zeros((3, 8), dtype=np.float32)))
     )
-    assert batch.tiles.shape == (3, 1, 2, 2)
     assert preds.array.shape == (3, 8)
     assert preds.request.tile_size == 2

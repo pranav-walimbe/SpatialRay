@@ -73,12 +73,14 @@ def build_graph(
     grouping: Sequence[PoolSpec] = DISAGGREGATED,
     *,
     inference: InferenceSpec,
+    ingress_options: Mapping[str, Any] | None = None,
 ):
     """Bind the preprocessing pools and the inference pool into one Serve application.
 
     Args:
         grouping: Ordered pool specs mapping stage groups onto preprocessing pools.
         inference: Spec for the inference pool, carrying its model factory and resources.
+        ingress_options: Serve options overriding the ingress defaults, none keeps them.
 
     Returns:
         The bound ingress application ready for serve.run or the serve run CLI.
@@ -94,4 +96,6 @@ def build_graph(
         .options(**deployment_options(inference))
         .bind(inference.model_factory, inference.work_unit)
     )
-    return serve.deployment(Ingress).options(name="ingress").bind(pools, inference_pool)
+    options = {"num_replicas": 2, "max_ongoing_requests": 32, **dict(ingress_options or {})}
+    ingress = serve.deployment(Ingress).options(name="ingress", **options)
+    return ingress.bind(pools, inference_pool)
