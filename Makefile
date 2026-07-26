@@ -26,11 +26,18 @@ perf-preprocess:
 perf-serve:
 	uv run --extra perf python -m perf.serve
 
-# terminate running ec2 instances
+# terminate every non-terminated spatialray-perf instance across all regions
 clear-ec2:
-	@ids=$$(aws ec2 describe-instances --region $(REGION) \
-	  --filters "Name=tag:Project,Values=spatialray-perf" "Name=instance-state-name,Values=pending,running" \
-	  --query "Reservations[].Instances[].InstanceId" --output text); \
-	if [ -z "$$ids" ]; then echo "no running spatialray-perf instances in $(REGION)"; else \
-	  echo "terminating:$$ids"; \
-	  aws ec2 terminate-instances --region $(REGION) --instance-ids $$ids; fi
+	@regions=$$(aws ec2 describe-regions --all-regions \
+	  --query "Regions[?OptInStatus!='not-opted-in'].RegionName" --output text); \
+	found=0; \
+	for r in $$regions; do \
+	  ids=$$(aws ec2 describe-instances --region $$r \
+	    --filters "Name=tag:Project,Values=spatialray-perf" \
+	      "Name=instance-state-name,Values=pending,running,stopping,stopped,rebooting" \
+	    --query "Reservations[].Instances[].InstanceId" --output text); \
+	  if [ -n "$$ids" ]; then \
+	    found=1; echo "$$r terminating:$$ids"; \
+	    aws ec2 terminate-instances --region $$r --instance-ids $$ids >/dev/null; fi; \
+	done; \
+	if [ $$found -eq 0 ]; then echo "no spatialray-perf instances in any region"; fi

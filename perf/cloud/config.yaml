@@ -36,10 +36,10 @@ pools:
     min_replicas: 1
     max_replicas: 2
   inference:
-    nodes: 3
+    nodes: 2
     replicas: 1
     min_replicas: 1
-    max_replicas: 3
+    max_replicas: 2
     cpu:
       instance_type: m7i.xlarge
       ami_ssm: cpu_ami_ssm

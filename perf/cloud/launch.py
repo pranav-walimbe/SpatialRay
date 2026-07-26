@@ -46,15 +46,17 @@ def main() -> None:
     s3 = boto3.client("s3", region_name=region)
 
     report_path = _ASSETS_DIR / f"perf-{args.hardware}-{args.model}.txt"
-    instance_ids = _launch_cluster(ec2, ssm, cfg, run_id, args)
-    print(f"launched {len(instance_ids)} nodes ({args.hardware}) run {run_id}: {instance_ids}")
+    instance_ids: list[str] = []
     try:
+        _launch_cluster(ec2, ssm, cfg, run_id, args, instance_ids)
+        print(f"launched {len(instance_ids)} nodes ({args.hardware}) run {run_id}: {instance_ids}")
         _wait_for_success(s3, ec2, cfg, run_id, instance_ids)
         _download(s3, cfg, run_id, "result.txt", report_path)
         print(f"wrote {report_path}")
     finally:
-        ec2.terminate_instances(InstanceIds=instance_ids)
-        print(f"terminated {instance_ids}")
+        if instance_ids:
+            ec2.terminate_instances(InstanceIds=instance_ids)
+            print(f"terminated {instance_ids}")
 
 
 def _cluster_nodes(cfg, hardware):
@@ -82,16 +84,14 @@ def _promote_head(nodes):
     return nodes
 
 
-def _launch_cluster(ec2, ssm, cfg, run_id, args):
-    # Boot one tagged instance per cluster node and return their instance ids
+def _launch_cluster(ec2, ssm, cfg, run_id, args, instance_ids):
+    # Boot one tagged node per role appending each id so a partial launch still cleans up
     nodes = _cluster_nodes(cfg, args.hardware)
     expected = len(nodes)
-    instance_ids = []
     for role, instance_type, ami_key, is_head in nodes:
         ami = _resolve_ami(ssm, cfg[ami_key])
         user_data = _render_bootstrap(cfg, run_id, args, role, is_head, expected)
         instance_ids.append(_run_instance(ec2, cfg, run_id, role, ami, instance_type, user_data))
-    return instance_ids
 
 
 def _run_instance(ec2, cfg, run_id, role, ami, instance_type, user_data):
