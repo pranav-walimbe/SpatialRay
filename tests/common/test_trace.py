@@ -9,6 +9,17 @@ import random
 from perf.common.trace import build_trace, poisson_arrivals
 from spatial_ray.workload.metadata import BandProfile, SceneRef
 
+_TRACE_KWARGS = dict(
+    rate_per_s=5.0,
+    n=8,
+    window_size=10,
+    band_names=("red",),
+    target_epsg=3857,
+    target_gsd=10.0,
+    tile_size=2,
+    seed=0,
+)
+
 
 def _scene(shape: tuple[int, int]) -> SceneRef:
     # Single-band scene over a square native grid
@@ -30,29 +41,24 @@ def _scene(shape: tuple[int, int]) -> SceneRef:
     )
 
 
-def test_poisson_arrivals_are_sorted_within_horizon():
-    """poisson_arrivals returns n ascending timestamps."""
-    arrivals = poisson_arrivals(2.0, 5, random.Random(0))
-    assert len(arrivals) == 5
-    assert arrivals == sorted(arrivals)
+def test_poisson_arrivals_are_reproducible_ascending_and_scale_with_rate():
+    """poisson_arrivals is seed-reproducible, sorted ascending, and tighter at a higher rate."""
+    slow = poisson_arrivals(1.0, 200, random.Random(0))
+    assert len(slow) == 200
+    assert slow == sorted(slow)
+    assert poisson_arrivals(1.0, 200, random.Random(0)) == slow
+    fast = poisson_arrivals(10.0, 200, random.Random(0))
+    assert fast[-1] < slow[-1]
 
 
-def test_build_trace_samples_windows_in_bounds():
-    """build_trace produces requests whose AOI windows fit the scene grid."""
-    entries = build_trace(
-        (_scene((100, 100)),),
-        rate_per_s=5.0,
-        n=3,
-        window_size=10,
-        band_names=("red",),
-        target_epsg=3857,
-        target_gsd=10.0,
-        tile_size=2,
-        seed=0,
-    )
-    assert len(entries) == 3
+def test_build_trace_is_reproducible_and_samples_in_bounds_windows():
+    """build_trace yields n arrival-ordered in-grid requests that repeat under the same seed."""
+    entries = build_trace((_scene((100, 100)),), **_TRACE_KWARGS)
+    assert len(entries) == _TRACE_KWARGS["n"]
+    assert [e.arrival_s for e in entries] == sorted(e.arrival_s for e in entries)
     for entry in entries:
         row_off, col_off, height, width = entry.request.window
         assert (height, width) == (10, 10)
-        assert 0 <= row_off <= 90
-        assert 0 <= col_off <= 90
+        assert 0 <= row_off <= 90 and 0 <= col_off <= 90
+    repeat = build_trace((_scene((100, 100)),), **_TRACE_KWARGS)
+    assert [e.request.window for e in repeat] == [e.request.window for e in entries]
