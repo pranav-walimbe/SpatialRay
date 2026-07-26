@@ -23,6 +23,36 @@ _WORK_WEIGHT: dict[str, Callable[[RasterPayload], float]] = {
     "tiles": lambda payload: float(predicted_tiles(payload.request)),
 }
 
+_MEAN_BYTES_ALPHA = (
+    0.05  # slow per-request EWMA so the mean tracks the workload regime not one request
+)
+
+
+class _MeanBytesGauge:
+    """A per-replica EWMA gauge of the decoded bytes per request the decode pool sees."""
+
+    def __init__(self) -> None:
+        self._mean: float | None = None
+        self._lock = threading.Lock()
+        self._gauge = metrics.Gauge(
+            "spatialray_mean_decoded_bytes",
+            description="EWMA of the decoded array bytes per request this decode replica sees.",
+        )
+
+    def record(self, request: RasterRequest) -> None:
+        """Fold this request's decoded byte size into the running mean and publish it.
+
+        Args:
+            request: Request whose AOI window and bands set its decoded byte size.
+        """
+        sample = float(decoded_bytes(request))
+        with self._lock:
+            if self._mean is None:
+                self._mean = sample
+            else:
+                self._mean = _MEAN_BYTES_ALPHA * sample + (1.0 - _MEAN_BYTES_ALPHA) * self._mean
+            self._gauge.set(self._mean)
+
 
 class _WorkGauge:
     """A per-replica gauge holding the work units a pool has in flight."""
@@ -73,6 +103,8 @@ class StagePool:
         self._work = (
             _WorkGauge(work_unit, _WORK_WEIGHT[work_unit]) if work_unit is not None else None
         )
+        # the byte-work pool also tracks its mean request size so decode can size on live bytes
+        self._mean_bytes = _MeanBytesGauge() if work_unit == "bytes" else None
 
     def run(self, payload: RasterPayload) -> RasterPayload:
         """Run this pool's stages in order on the payload.
@@ -83,6 +115,8 @@ class StagePool:
         Returns:
             The payload after all of the pool's stages have run.
         """
+        if self._mean_bytes is not None:
+            self._mean_bytes.record(payload.request)
         with self._work.track(payload) if self._work is not None else nullcontext():
             for stage in self._stages:
                 payload = stage(payload, self._io_pool) if stage is decode else stage(payload)

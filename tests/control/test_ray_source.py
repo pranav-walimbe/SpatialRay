@@ -22,6 +22,7 @@ def _view() -> MetricsView:
         work={"decode": 2048.0, "inference": 12.0},
         queue={"inference": 7.0, "transform": 1.0},
         roles={"t1": "transform", "t2": "transform", "g1": "inference"},
+        mean_bytes={"decode": 512.0},
     )
 
 
@@ -55,6 +56,7 @@ def test_build_observation_backlog_only():
     assert decode.utilization == 0.0
     assert decode.work_in_flight == 2048.0
     assert decode.queue_depth == 0.0
+    assert decode.mean_decoded_bytes == 512.0
 
 
 def test_source_smooths():

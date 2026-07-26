@@ -30,6 +30,8 @@ def _node_b() -> str:
         "ray_spatialray_work_in_flight", "w", ["deployment", "work_unit"], registry=registry
     )
     work.labels(deployment="decode", work_unit="bytes").set(1024.0)
+    mean = Gauge("ray_spatialray_mean_decoded_bytes", "m", ["deployment"], registry=registry)
+    mean.labels(deployment="decode").set(512.0)
     queue = Gauge("ray_serve_replica_processing_queries", "q", ["deployment"], registry=registry)
     queue.labels(deployment="inference").set(3.0)
     return generate_latest(registry).decode()
@@ -42,5 +44,6 @@ def test_parse_metrics_view():
     assert view.node_cpu == {"t1": 40.0, "t2": 60.0}
     assert view.node_gpu == {"g1": 80.0}
     assert view.work == {"decode": 1024.0}
+    assert view.mean_bytes == {"decode": 512.0}
     assert view.queue == {"inference": 7.0}
     assert view.roles == roles

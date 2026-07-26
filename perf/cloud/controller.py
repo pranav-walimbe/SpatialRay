@@ -17,7 +17,7 @@ from spatial_ray.policy.dynamic import (
     disaggregated_dynamic_policy,
     inference_queue_setpoint,
 )
-from spatial_ray.serve.graph import InferenceSpec
+from spatial_ray.serve.application import Application
 
 
 def pool_bounds(pools_cfg: Mapping[str, Any]) -> dict[str, PoolBounds]:
@@ -35,19 +35,22 @@ def pool_bounds(pools_cfg: Mapping[str, Any]) -> dict[str, PoolBounds]:
     }
 
 
-def build_policy(controller_cfg: Mapping[str, Any], inference: InferenceSpec) -> DynamicPolicy:
-    """Map the controller config and inference spec onto the dynamic policy.
+def build_policy(controller_cfg: Mapping[str, Any], application: Application) -> DynamicPolicy:
+    """Map the controller config and application specs onto the dynamic policy.
 
     Args:
         controller_cfg: The controller section of the cloud config.
-        inference: The inference pool spec whose request cap sets the queue setpoint.
+        application: The deployed application whose pool specs set the decode and queue setpoints.
 
     Returns:
         A dynamic policy pairing each pool with its own bottleneck signal.
     """
+    decode = next(spec for spec in application.grouping if spec.name == "decode")
     return disaggregated_dynamic_policy(
-        decode_bytes_per_replica=controller_cfg["decode_bytes_per_replica"],
-        inference_queue_per_replica=inference_queue_setpoint(inference.max_ongoing_requests),
+        decode_max_ongoing_requests=decode.max_ongoing_requests,
+        inference_queue_per_replica=inference_queue_setpoint(
+            application.inference.max_ongoing_requests
+        ),
         transform_util_target=controller_cfg["transform_util_target"],
         inference_util_target=controller_cfg["inference_util_target"],
     )
@@ -66,7 +69,7 @@ def start_controller(model_name: str, hardware: str):
     config = load_config()
     application = from_config(model_name, hardware)
     return launch_detached(
-        build_policy(config["controller"], application.inference),
+        build_policy(config["controller"], application),
         pool_bounds(config["pools"]),
         application.serve_config,
         app_name=application.app_name,

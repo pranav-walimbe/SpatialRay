@@ -16,6 +16,7 @@ class PoolObservation:
         float  # spatialray_work_in_flight gauge sum, bytes for decode and tiles elsewhere
     )
     utilization: float  # EWMA-smoothed saturation fraction, CPU for transform and GPU for inference
+    mean_decoded_bytes: float = 0.0  # EWMA decoded bytes per request, sizing decode's byte backlog
 
 
 @dataclass(frozen=True)

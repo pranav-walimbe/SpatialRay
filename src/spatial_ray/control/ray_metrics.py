@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import ray
 from prometheus_client.parser import text_string_to_metric_families
@@ -21,6 +21,7 @@ NODE_GRAM = "ray_node_gram_used"
 NODE_MEM = "ray_node_mem_used"
 WORK = "ray_spatialray_work_in_flight"
 QUEUE = "ray_serve_replica_processing_queries"
+MEAN_BYTES = "ray_spatialray_mean_decoded_bytes"
 
 # per-family reduction the observation view reads, each family with its label and aggregation
 _VIEW_SPECS = {
@@ -28,6 +29,7 @@ _VIEW_SPECS = {
     NODE_GPU: ("ip", "sum"),
     WORK: ("deployment", "sum"),
     QUEUE: ("deployment", "sum"),
+    MEAN_BYTES: ("deployment", "last"),
 }
 
 
@@ -38,6 +40,9 @@ class MetricsView:
     work: dict[str, float]  # deployment to work units in flight from our custom gauge
     queue: dict[str, float]  # deployment to queued and processing queries across its replicas
     roles: dict[str, str]  # node ip to the pool that node hosts
+    mean_bytes: dict[str, float] = field(
+        default_factory=dict
+    )  # deployment to its EWMA decoded bytes per request
 
 
 def metrics_endpoints() -> list[str]:
@@ -147,6 +152,7 @@ def parse_metrics_view(texts: list[str], roles: Mapping[str, str]) -> MetricsVie
         work=reduced[WORK],
         queue=reduced[QUEUE],
         roles=dict(roles),
+        mean_bytes=reduced[MEAN_BYTES],
     )
 
 

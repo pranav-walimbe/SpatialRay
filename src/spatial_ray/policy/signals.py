@@ -63,6 +63,27 @@ class Backlog:
 
 
 @dataclass(frozen=True)
+class AdaptiveBacklog:
+    """A byte-backlog signal sizing a pool from its live mean request size and batch concurrency."""
+
+    max_ongoing_requests: int  # per-replica request cap the byte setpoint scales with
+
+    def demand(self, pool: PoolObservation) -> float:
+        """Divide bytes in flight by the concurrency-scaled per-replica byte setpoint.
+
+        Args:
+            pool: The pool whose bytes in flight and smoothed mean request size are read.
+
+        Returns:
+            The replicas that hold each at max_ongoing_requests mean-sized requests, or zero
+            before any request has set the mean.
+        """
+        if pool.mean_decoded_bytes <= 0.0:
+            return 0.0
+        return pool.work_in_flight / (self.max_ongoing_requests * pool.mean_decoded_bytes)
+
+
+@dataclass(frozen=True)
 class MaxOf:
     """A combinator sizing a pool to whichever of its component signals is most saturated."""
 

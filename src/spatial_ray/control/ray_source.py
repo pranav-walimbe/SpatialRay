@@ -89,6 +89,7 @@ def build_observation(
             queue_depth=view.queue.get(name, 0.0),
             work_in_flight=view.work.get(name, 0.0),
             utilization=smoothed,
+            mean_decoded_bytes=view.mean_bytes.get(name, 0.0),
         )
     return Observation(t_s=t_s, arrival_rate=arrival_rate, pools=pools)
 

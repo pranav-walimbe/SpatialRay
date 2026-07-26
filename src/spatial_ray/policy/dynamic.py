@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil
 
-from spatial_ray.policy.signals import Backlog, MaxOf, Signal, Utilization
+from spatial_ray.policy.signals import AdaptiveBacklog, Backlog, MaxOf, Signal, Utilization
 from spatial_ray.policy.types import Action, Observation
 
 _SERVE_DEFAULT_MAX_ONGOING = 5  # Ray Serve's per-replica request cap when a pool leaves it unset
@@ -53,7 +53,7 @@ class DynamicPolicy:
 
 def disaggregated_dynamic_policy(
     *,
-    decode_bytes_per_replica: float,
+    decode_max_ongoing_requests: int,
     inference_queue_per_replica: float,
     transform_util_target: float = 0.7,
     inference_util_target: float = 0.7,
@@ -61,7 +61,7 @@ def disaggregated_dynamic_policy(
     """Wire the decode, transform, and inference pools to their decided dynamic signals.
 
     Args:
-        decode_bytes_per_replica: Work-in-flight bytes one decode replica is provisioned to hold.
+        decode_max_ongoing_requests: The decode pool's per-replica request cap the setpoint scales.
         inference_queue_per_replica: Queued requests one inference replica is provisioned to hold.
         transform_util_target: CPU utilization setpoint the transform pool is sized to.
         inference_util_target: GPU utilization setpoint the inference pool is sized to.
@@ -71,7 +71,7 @@ def disaggregated_dynamic_policy(
     """
     return DynamicPolicy(
         signals={
-            "decode": Backlog(per_replica=decode_bytes_per_replica, metric="work_in_flight"),
+            "decode": AdaptiveBacklog(max_ongoing_requests=decode_max_ongoing_requests),
             "transform": Utilization(target=transform_util_target),
             "inference": MaxOf(
                 (

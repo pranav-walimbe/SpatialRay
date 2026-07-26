@@ -9,7 +9,7 @@ from spatial_ray.policy.dynamic import (
     disaggregated_dynamic_policy,
     inference_queue_setpoint,
 )
-from spatial_ray.policy.signals import Backlog, MaxOf, Utilization
+from spatial_ray.policy.signals import AdaptiveBacklog, Backlog, MaxOf, Utilization
 from spatial_ray.policy.types import Observation, PoolObservation
 
 
@@ -20,6 +20,7 @@ def _pool(
     queue_depth: float = 0.0,
     work_in_flight: float = 0.0,
     utilization: float = 0.0,
+    mean_decoded_bytes: float = 0.0,
 ) -> PoolObservation:
     # one pool's signals with every field defaulted
     return PoolObservation(
@@ -28,6 +29,7 @@ def _pool(
         queue_depth=queue_depth,
         work_in_flight=work_in_flight,
         utilization=utilization,
+        mean_decoded_bytes=mean_decoded_bytes,
     )
 
 
@@ -42,6 +44,13 @@ def test_utilization_signal():
     signal = Utilization(target=0.5)
     assert signal.demand(_pool("t", replicas=4, utilization=0.5)) == 4.0
     assert signal.demand(_pool("t", replicas=4, utilization=1.0)) == 8.0
+
+
+def test_adaptive_backlog_signal():
+    """Divides bytes in flight by concurrency times mean size, zero before the mean is set."""
+    signal = AdaptiveBacklog(max_ongoing_requests=4)
+    assert signal.demand(_pool("d", work_in_flight=800.0, mean_decoded_bytes=100.0)) == 2.0
+    assert signal.demand(_pool("d", work_in_flight=800.0)) == 0.0
 
 
 def test_backlog_signal():
@@ -80,12 +89,14 @@ def test_decide_ceils_and_filters():
 def test_decide_skips_absent_pool():
     """A configured pool missing from the observation is left out."""
     policy = disaggregated_dynamic_policy(
-        decode_bytes_per_replica=100.0, inference_queue_per_replica=4.0
+        decode_max_ongoing_requests=2, inference_queue_per_replica=4.0
     )
     observation = Observation(
         t_s=0.0,
         arrival_rate=1.0,
-        pools={"decode": _pool("decode", replicas=2, work_in_flight=350.0)},
+        pools={
+            "decode": _pool("decode", replicas=2, work_in_flight=350.0, mean_decoded_bytes=50.0)
+        },
     )
     action = policy.decide(observation)
     assert action.targets == {"decode": 4}
