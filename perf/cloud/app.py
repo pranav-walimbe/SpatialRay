@@ -1,5 +1,5 @@
 """
-Sizes the disaggregated Serve pools from the cloud config and binds a runnable graph.
+Sizes the disaggregated Serve pools from the cloud config into a runnable Application.
 """
 
 from __future__ import annotations
@@ -10,40 +10,29 @@ import os
 from perf.cloud.utils import load_config
 from perf.common.models import DEFAULT_MODEL, load
 from spatial_ray.control.ray_metrics import node_resource
-from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec, build_graph
+from spatial_ray.serve.application import Application
+from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec
 
 APP_NAME = "spatialray"
+_IMPORT_PATH = "perf.cloud.app:app"
 _HARDWARE_ENV = "SPATIALRAY_HARDWARE"
 _MODEL_ENV = "SPATIALRAY_MODEL"
 
 
-def sized_specs(model_name: str, hardware: str):
-    """Size each pool from the cloud config and pin it to its per-stage node.
+def from_config(model_name: str = DEFAULT_MODEL, hardware: str = "cpu") -> Application:
+    """Size the disaggregated pools from the cloud config into a runnable Application.
 
     Args:
         model_name: Model module name under perf.common.models for the inference pool.
         hardware: Target hardware, cpu or gpu, selecting the inference replica's device.
 
     Returns:
-        The preprocessing pool specs and the inference spec, each sized and node-pinned.
+        An Application binding the sized grouping and inference spec.
     """
     pools_cfg = load_config()["pools"]
-    pools = tuple(_sized_pool(spec, pools_cfg[spec.name]) for spec in DISAGGREGATED)
-    return pools, _inference_spec(pools_cfg, model_name, hardware)
-
-
-def build_app(model_name: str = DEFAULT_MODEL, hardware: str = "cpu"):
-    """Size the pools and bind the disaggregated graph into a runnable Serve application.
-
-    Args:
-        model_name: Model module name under perf.common.models for the inference pool.
-        hardware: Target hardware, cpu or gpu, selecting the inference replica's device.
-
-    Returns:
-        The bound ingress application ready for serve.run or the serve run CLI.
-    """
-    pools, inference = sized_specs(model_name, hardware)
-    return build_graph(pools, inference=inference)
+    grouping = tuple(_sized_pool(spec, pools_cfg[spec.name]) for spec in DISAGGREGATED)
+    inference = _inference_spec(pools_cfg, model_name, hardware)
+    return Application(grouping, inference, import_path=_IMPORT_PATH, app_name=APP_NAME)
 
 
 def _sized_pool(spec, pool_cfg):
@@ -75,4 +64,6 @@ def _model_factory(model_name):
     return build
 
 
-app = build_app(os.environ.get(_MODEL_ENV, DEFAULT_MODEL), os.environ.get(_HARDWARE_ENV, "cpu"))
+app = from_config(
+    os.environ.get(_MODEL_ENV, DEFAULT_MODEL), os.environ.get(_HARDWARE_ENV, "cpu")
+).graph

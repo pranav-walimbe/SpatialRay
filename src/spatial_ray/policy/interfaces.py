@@ -1,5 +1,5 @@
 """
-The three protocols that make the simulator and the Ray deployment interchangeable.
+The three protocols decoupling the decision loop from Ray.
 """
 
 from __future__ import annotations

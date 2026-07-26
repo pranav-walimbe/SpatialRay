@@ -7,15 +7,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from perf.cloud.app import APP_NAME, sized_specs
+from perf.cloud.app import from_config
 from perf.cloud.utils import load_config
 from spatial_ray.control.actor import launch_detached, stop_detached
 from spatial_ray.control.bounds import PoolBounds
 from spatial_ray.control.controller import DEFAULT_TICK_S
 from spatial_ray.policy.dynamic import DynamicPolicy, disaggregated_dynamic_policy
-from spatial_ray.serve.serve_config import compile_serve_config
-
-_IMPORT_PATH = "perf.cloud.app:app"
 
 
 def pool_bounds(pools_cfg: Mapping[str, Any]) -> dict[str, PoolBounds]:
@@ -61,12 +58,12 @@ def start_controller(model_name: str, hardware: str):
         The running detached controller actor handle.
     """
     config = load_config()
-    pools, inference = sized_specs(model_name, hardware)
+    application = from_config(model_name, hardware)
     return launch_detached(
         build_policy(config["controller"]),
         pool_bounds(config["pools"]),
-        compile_serve_config(pools, inference, import_path=_IMPORT_PATH, app_name=APP_NAME),
-        app_name=APP_NAME,
+        application.serve_config,
+        app_name=application.app_name,
         tick_s=config["controller"].get("tick_s", DEFAULT_TICK_S),
     )
 

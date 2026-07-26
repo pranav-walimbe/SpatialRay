@@ -11,13 +11,12 @@ from dataclasses import dataclass
 import ray
 from ray import serve
 
-from perf.cloud.app import APP_NAME, sized_specs
+from perf.cloud.app import from_config
 from perf.cloud.controller import start_controller, stop_controller
 from perf.cloud.metrics import Snapshot, deployment_latency, parse_snapshot
 from perf.common.models import load
 from perf.common.trace import build_default_trace
 from spatial_ray.control.ray_metrics import metrics_endpoints, node_roles, scrape
-from spatial_ray.serve.graph import build_graph
 
 _SAMPLE_INTERVAL_S = 1.0  # metrics scrape period during the run
 
@@ -49,11 +48,10 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
     """
     model = load(model_name)
     trace = build_default_trace(model, n=n_requests, rate_per_s=rate_per_s)
-    pools, inference = sized_specs(model_name, hardware)
-    app = build_graph(pools, inference=inference)
+    application = from_config(model_name, hardware)
     ray.init(ignore_reinit_error=True)
     try:
-        handle = serve.run(app, name=APP_NAME)
+        handle = serve.run(application.graph, name=application.app_name)
         start_controller(model_name, hardware)
         endpoints = metrics_endpoints()
         roles = node_roles()
@@ -75,7 +73,7 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         samples=tuple(samples),
         latency=latency,
         roles=roles,
-        work_units=_work_units(pools, inference),
+        work_units=_work_units(application.grouping, application.inference),
     )
 
 

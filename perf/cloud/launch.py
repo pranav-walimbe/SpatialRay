@@ -58,14 +58,28 @@ def main() -> None:
 
 
 def _cluster_nodes(cfg, hardware):
-    # The decode and transform worker nodes plus the inference head node
+    # Every pool's node budget expanded to one entry per instance with one inference node as head
     pools = cfg["pools"]
     inference = pools["inference"][hardware]
-    return [
-        ("decode", pools["decode"]["instance_type"], pools["decode"]["ami_ssm"], False),
-        ("transform", pools["transform"]["instance_type"], pools["transform"]["ami_ssm"], False),
-        ("inference", inference["instance_type"], inference["ami_ssm"], True),
-    ]
+    specs = {
+        "decode": (pools["decode"]["instance_type"], pools["decode"]["ami_ssm"]),
+        "transform": (pools["transform"]["instance_type"], pools["transform"]["ami_ssm"]),
+        "inference": (inference["instance_type"], inference["ami_ssm"]),
+    }
+    nodes = []
+    for role, (instance_type, ami_key) in specs.items():
+        for _ in range(pools[role]["nodes"]):
+            nodes.append((role, instance_type, ami_key, False))
+    return _promote_head(nodes)
+
+
+def _promote_head(nodes):
+    # Set the head flag on the first inference node so it hosts the Ray head and runs perf.cloud
+    for index, (role, instance_type, ami_key, _) in enumerate(nodes):
+        if role == "inference":
+            nodes[index] = (role, instance_type, ami_key, True)
+            break
+    return nodes
 
 
 def _launch_cluster(ec2, ssm, cfg, run_id, args):
