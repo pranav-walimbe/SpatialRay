@@ -77,8 +77,7 @@ def build_observation(
         arrival_rate: System ingress request rate, left at zero until the predictive policy uses it.
 
     Returns:
-        An observation whose pools carry live replicas, queue depth, work in flight, and smoothed
-        utilization.
+        An observation carrying live replicas, queue depth, work in flight, and utilization.
     """
     pools: dict[str, PoolObservation] = {}
     for name, count in replicas.items():
@@ -127,7 +126,7 @@ class RayObservationSource:
         self._read_metrics = read_metrics
         self._read_replicas = read_replicas
         self._util_kinds = dict(util_kinds)
-        # one smoother per pool that actually reports utilization, so noisy pools ramp gently
+        # one smoother per pool that actually reports utilization
         self._ewmas = {
             name: _Ewma(ewma_alpha) for name, kind in util_kinds.items() if kind is not None
         }

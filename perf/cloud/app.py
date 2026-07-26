@@ -9,6 +9,7 @@ import os
 
 from perf.cloud.utils import load_config
 from perf.common.models import DEFAULT_MODEL, load
+from spatial_ray.control.ray_metrics import node_resource
 from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec, build_graph
 
 APP_NAME = "spatialray"
@@ -47,7 +48,7 @@ def build_app(model_name: str = DEFAULT_MODEL, hardware: str = "cpu"):
 
 def _sized_pool(spec, pool_cfg):
     # replica count from config and a fractional node resource pinning the pool to its stage node
-    options = {"num_cpus": pool_cfg["num_cpus"], "resources": {f"{spec.name}_node": 0.01}}
+    options = {"num_cpus": pool_cfg["num_cpus"], "resources": {node_resource(spec.name): 0.01}}
     return dataclasses.replace(spec, num_replicas=pool_cfg["replicas"], ray_actor_options=options)
 
 
@@ -55,7 +56,7 @@ def _inference_spec(pools_cfg, model_name, hardware):
     # inference pool sized from config with its replica pinned to the inference node
     inference_cfg = pools_cfg["inference"]
     variant = inference_cfg[hardware]
-    options = {"resources": {"inference_node": 0.01}}
+    options = {"resources": {node_resource("inference"): 0.01}}
     for key in ("num_cpus", "num_gpus"):
         if key in variant:
             options[key] = variant[key]

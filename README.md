@@ -1,2 +1,2 @@
 # SpatialRay
-An adaptive serving framework for geospatial ML
+A decoupled inference framework for geospatial ML

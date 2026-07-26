@@ -9,13 +9,27 @@ from dataclasses import dataclass
 
 from prometheus_client.parser import text_string_to_metric_families
 
-_NODE_CPU = "ray_node_cpu_utilization"
-_NODE_GPU = "ray_node_gpus_utilization"
-_NODE_GRAM = "ray_node_gram_used"
-_NODE_MEM = "ray_node_mem_used"
-_WORK = "ray_spatialray_work_in_flight"
-_QUEUE = "ray_serve_replica_processing_queries"
+from spatial_ray.control.ray_metrics import (
+    NODE_CPU,
+    NODE_GPU,
+    NODE_GRAM,
+    NODE_MEM,
+    QUEUE,
+    WORK,
+    reduce_families,
+)
+
 _LATENCY = "ray_serve_deployment_processing_latency_ms"
+
+# per-family reduction the plotted snapshot reads, each family with its label and aggregation
+_SNAPSHOT_SPECS = {
+    NODE_CPU: ("ip", "last"),
+    NODE_GPU: ("ip", "sum"),
+    NODE_GRAM: ("ip", "sum"),
+    NODE_MEM: ("ip", "last"),
+    WORK: ("deployment", "sum"),
+    QUEUE: ("deployment", "sum"),
+}
 
 
 @dataclass(frozen=True)
@@ -39,30 +53,16 @@ def parse_snapshot(texts: list[str], t_s: float) -> Snapshot:
     Returns:
         A Snapshot holding per-node hardware gauges and per-deployment work and queue depth.
     """
-    node_cpu: dict[str, float] = {}
-    node_gpu: dict[str, float] = {}
-    node_gram: dict[str, float] = {}
-    node_mem: dict[str, float] = {}
-    work: dict[str, float] = defaultdict(float)
-    queue: dict[str, float] = defaultdict(float)
-    for text in texts:
-        for family in text_string_to_metric_families(text):
-            for sample in family.samples:
-                ip = sample.labels.get("ip", "?")
-                deployment = sample.labels.get("deployment")
-                if family.name == _NODE_CPU:
-                    node_cpu[ip] = sample.value
-                elif family.name == _NODE_GPU:
-                    node_gpu[ip] = node_gpu.get(ip, 0.0) + sample.value
-                elif family.name == _NODE_GRAM:
-                    node_gram[ip] = node_gram.get(ip, 0.0) + sample.value
-                elif family.name == _NODE_MEM:
-                    node_mem[ip] = sample.value
-                elif family.name == _WORK and deployment is not None:
-                    work[deployment] += sample.value
-                elif family.name == _QUEUE and deployment is not None:
-                    queue[deployment] += sample.value
-    return Snapshot(t_s, node_cpu, node_gpu, node_gram, node_mem, dict(work), dict(queue))
+    reduced = reduce_families(texts, _SNAPSHOT_SPECS)
+    return Snapshot(
+        t_s=t_s,
+        node_cpu=reduced[NODE_CPU],
+        node_gpu=reduced[NODE_GPU],
+        node_gram=reduced[NODE_GRAM],
+        node_mem=reduced[NODE_MEM],
+        work=reduced[WORK],
+        queue=reduced[QUEUE],
+    )
 
 
 def deployment_latency(texts: list[str]) -> dict[str, dict]:
