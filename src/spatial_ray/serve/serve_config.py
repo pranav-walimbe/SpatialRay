@@ -22,7 +22,7 @@ def compile_serve_config(
     Args:
         grouping: Ordered pool specs mapping stage groups onto preprocessing pools.
         inference: Spec for the inference pool.
-        import_path: Module path to the bound Serve application, e.g. perf.cluster.app:app.
+        import_path: Module path to the bound Serve application, e.g. perf.cloud.app:app.
         app_name: Name of the compiled application.
 
     Returns:

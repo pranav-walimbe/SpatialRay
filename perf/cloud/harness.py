@@ -5,25 +5,19 @@ Deploys the disaggregated Ray Serve graph and paces a Poisson trace while sampli
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import time
 from dataclasses import dataclass
 
 import ray
 from ray import serve
 
-from perf.cloud.metrics import (
-    Snapshot,
-    deployment_latency,
-    metrics_endpoints,
-    node_roles,
-    parse_snapshot,
-    scrape,
-)
-from perf.cloud.utils import load_config
+from perf.cloud.app import APP_NAME, sized_specs
+from perf.cloud.controller import start_controller, stop_controller
+from perf.cloud.metrics import Snapshot, deployment_latency, parse_snapshot
 from perf.common.models import load
 from perf.common.trace import build_default_trace
-from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec, build_graph
+from spatial_ray.control.ray_metrics import metrics_endpoints, node_roles, scrape
+from spatial_ray.serve.graph import build_graph
 
 _SAMPLE_INTERVAL_S = 1.0  # metrics scrape period during the run
 
@@ -42,7 +36,7 @@ class Report:
 
 
 def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -> Report:
-    """Deploy the disaggregated graph, drive a Poisson trace, and sample its Ray metrics.
+    """Deploy the disaggregated graph, autoscale it with the controller, and drive a Poisson trace.
 
     Args:
         model_name: Model module name under perf.common.models for the inference pool.
@@ -53,15 +47,14 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
     Returns:
         A Report with the run's metrics time-series and per-deployment latency stats.
     """
-    pools_cfg = load_config()["pools"]
     model = load(model_name)
     trace = build_default_trace(model, n=n_requests, rate_per_s=rate_per_s)
-    pools = _sized_pools(pools_cfg)
-    inference = _inference_spec(pools_cfg, model_name, hardware)
+    pools, inference = sized_specs(model_name, hardware)
     app = build_graph(pools, inference=inference)
     ray.init(ignore_reinit_error=True)
     try:
-        handle = serve.run(app)
+        handle = serve.run(app, name=APP_NAME)
+        start_controller(model_name, hardware)
         endpoints = metrics_endpoints()
         roles = node_roles()
         samples: list[Snapshot] = []
@@ -69,6 +62,7 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         final = scrape(endpoints)
         latency = deployment_latency(final)
     finally:
+        stop_controller()
         serve.shutdown()
         ray.shutdown()
 
@@ -85,47 +79,12 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
     )
 
 
-def _sized_pools(pools_cfg):
-    # Size each pool from config and pin it to its per-stage node resource
-    pools = []
-    for spec in DISAGGREGATED:
-        pool_cfg = pools_cfg[spec.name]
-        options = {"num_cpus": pool_cfg["num_cpus"], "resources": {f"{spec.name}_node": 0.01}}
-        pools.append(
-            dataclasses.replace(spec, num_replicas=pool_cfg["replicas"], ray_actor_options=options)
-        )
-    return tuple(pools)
-
-
-def _inference_spec(pools_cfg, model_name, hardware):
-    # Build the inference pool spec from config with its replica pinned to the inference node
-    inference_cfg = pools_cfg["inference"]
-    variant = inference_cfg[hardware]
-    options = {"resources": {"inference_node": 0.01}}
-    for key in ("num_cpus", "num_gpus"):
-        if key in variant:
-            options[key] = variant[key]
-    return InferenceSpec(
-        model_factory=_model_factory(model_name),
-        num_replicas=inference_cfg["replicas"],
-        ray_actor_options=options,
-    )
-
-
 def _work_units(pools, inference):
     # map each deployment to its work-in-flight unit from the spec rather than the metric label
     units = {spec.name: spec.work_unit for spec in pools if spec.work_unit}
     if inference.work_unit:
         units[inference.name] = inference.work_unit
     return units
-
-
-def _model_factory(model_name):
-    # Zero-arg factory that Serve cloudpickles to rebuild the model on each inference replica
-    def build():
-        return load(model_name).build()
-
-    return build
 
 
 async def _run_load(handle, trace, endpoints, samples):

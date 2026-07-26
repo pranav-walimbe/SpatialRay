@@ -25,13 +25,19 @@ pools:
     ami_ssm: cpu_ami_ssm
     replicas: 3
     num_cpus: 1
+    min_replicas: 1
+    max_replicas: 8
   transform:
     instance_type: c6i.2xlarge
     ami_ssm: cpu_ami_ssm
     replicas: 2
     num_cpus: 2
+    min_replicas: 1
+    max_replicas: 2
   inference:
     replicas: 1
+    min_replicas: 1
+    max_replicas: 3
     cpu:
       instance_type: m7i.xlarge
       ami_ssm: cpu_ami_ssm
@@ -41,3 +47,12 @@ pools:
       ami_ssm: gpu_ami_ssm
       num_cpus: 1
       num_gpus: 1
+
+# dynamic-policy control loop tuning read by the detached controller actor
+controller:
+  tick_s: 12.0
+  transform_util_target: 0.7
+  inference_util_target: 0.7
+  # signal capacities to calibrate from a measured run
+  decode_bytes_per_replica: 268435456
+  inference_queue_per_replica: 8

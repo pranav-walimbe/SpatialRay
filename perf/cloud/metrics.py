@@ -1,17 +1,14 @@
 """
-Scrapes Ray's Prometheus endpoints into time-series snapshots and per-deployment latency stats.
+Reduces the cloud harness scrapes into time-series memory snapshots and per-deployment latency.
 """
 
 from __future__ import annotations
 
-import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass
 
-import ray
 from prometheus_client.parser import text_string_to_metric_families
 
-_SCRAPE_TIMEOUT_S = 5
 _NODE_CPU = "ray_node_cpu_utilization"
 _NODE_GPU = "ray_node_gpus_utilization"
 _NODE_GRAM = "ray_node_gram_used"
@@ -32,55 +29,8 @@ class Snapshot:
     queue: dict[str, float]  # deployment to queries being processed across its replicas
 
 
-def metrics_endpoints() -> list[str]:
-    """Return the Prometheus /metrics URL of every alive Ray node.
-
-    Returns:
-        One scrape URL per alive node in the current Ray cluster.
-    """
-    return [
-        f"http://{node['NodeManagerAddress']}:{node['MetricsExportPort']}/metrics"
-        for node in ray.nodes()
-        if node.get("alive")
-    ]
-
-
-def node_roles() -> dict[str, str]:
-    """Map each node ip to the stage it hosts, read from its per-stage node resource.
-
-    Returns:
-        Node ip to role name for nodes carrying a <role>_node custom resource.
-    """
-    roles = {}
-    for node in ray.nodes():
-        ip = node["NodeManagerAddress"]
-        for resource in node.get("Resources", {}):
-            if resource.endswith("_node"):
-                roles[ip] = resource[: -len("_node")]
-    return roles
-
-
-def scrape(endpoints: list[str]) -> list[str]:
-    """Fetch the Prometheus exposition text from each reachable endpoint.
-
-    Args:
-        endpoints: Node /metrics URLs to scrape, unreachable ones are skipped.
-
-    Returns:
-        One exposition document per reachable endpoint, kept separate so each parses on its own.
-    """
-    texts = []
-    for url in endpoints:
-        try:
-            with urllib.request.urlopen(url, timeout=_SCRAPE_TIMEOUT_S) as response:
-                texts.append(response.read().decode())
-        except OSError:
-            continue
-    return texts
-
-
 def parse_snapshot(texts: list[str], t_s: float) -> Snapshot:
-    """Reduce one scrape into a timestamped snapshot of the gauges we plot.
+    """Reduce one scrape into a timestamped snapshot of the hardware and Serve gauges we plot.
 
     Args:
         texts: Per-node Prometheus exposition documents scraped from the cluster.
@@ -89,22 +39,29 @@ def parse_snapshot(texts: list[str], t_s: float) -> Snapshot:
     Returns:
         A Snapshot holding per-node hardware gauges and per-deployment work and queue depth.
     """
-    node_cpu, node_gpu, node_gram, node_mem = {}, {}, {}, {}
+    node_cpu: dict[str, float] = {}
+    node_gpu: dict[str, float] = {}
+    node_gram: dict[str, float] = {}
+    node_mem: dict[str, float] = {}
     work: dict[str, float] = defaultdict(float)
     queue: dict[str, float] = defaultdict(float)
-    for family in _families(texts):
-        if family.name == _NODE_CPU:
-            _fill_by_ip(node_cpu, family.samples)
-        elif family.name == _NODE_GPU:
-            _accumulate_by_ip(node_gpu, family.samples)
-        elif family.name == _NODE_GRAM:
-            _accumulate_by_ip(node_gram, family.samples)
-        elif family.name == _NODE_MEM:
-            _fill_by_ip(node_mem, family.samples)
-        elif family.name == _WORK:
-            _accumulate_by_deployment(work, family.samples)
-        elif family.name == _QUEUE:
-            _accumulate_by_deployment(queue, family.samples)
+    for text in texts:
+        for family in text_string_to_metric_families(text):
+            for sample in family.samples:
+                ip = sample.labels.get("ip", "?")
+                deployment = sample.labels.get("deployment")
+                if family.name == _NODE_CPU:
+                    node_cpu[ip] = sample.value
+                elif family.name == _NODE_GPU:
+                    node_gpu[ip] = node_gpu.get(ip, 0.0) + sample.value
+                elif family.name == _NODE_GRAM:
+                    node_gram[ip] = node_gram.get(ip, 0.0) + sample.value
+                elif family.name == _NODE_MEM:
+                    node_mem[ip] = sample.value
+                elif family.name == _WORK and deployment is not None:
+                    work[deployment] += sample.value
+                elif family.name == _QUEUE and deployment is not None:
+                    queue[deployment] += sample.value
     return Snapshot(t_s, node_cpu, node_gpu, node_gram, node_mem, dict(work), dict(queue))
 
 
@@ -120,19 +77,20 @@ def deployment_latency(texts: list[str]) -> dict[str, dict]:
     counts: dict[str, float] = defaultdict(float)
     sums: dict[str, float] = defaultdict(float)
     buckets: dict[str, dict[float, float]] = defaultdict(lambda: defaultdict(float))
-    for family in _families(texts):
-        if family.name != _LATENCY:
-            continue
-        for sample in family.samples:
-            deployment = sample.labels.get("deployment")
-            if deployment is None:
+    for text in texts:
+        for family in text_string_to_metric_families(text):
+            if family.name != _LATENCY:
                 continue
-            if sample.name.endswith("_count"):
-                counts[deployment] += sample.value
-            elif sample.name.endswith("_sum"):
-                sums[deployment] += sample.value
-            elif sample.name.endswith("_bucket"):
-                buckets[deployment][float(sample.labels["le"])] += sample.value
+            for sample in family.samples:
+                deployment = sample.labels.get("deployment")
+                if deployment is None:
+                    continue
+                if sample.name.endswith("_count"):
+                    counts[deployment] += sample.value
+                elif sample.name.endswith("_sum"):
+                    sums[deployment] += sample.value
+                elif sample.name.endswith("_bucket"):
+                    buckets[deployment][float(sample.labels["le"])] += sample.value
     stats = {}
     for deployment, count in counts.items():
         ordered = sorted(buckets[deployment].items())
@@ -143,33 +101,6 @@ def deployment_latency(texts: list[str]) -> dict[str, dict]:
             "latency_p99_ms": _histogram_quantile(ordered, 0.99),
         }
     return stats
-
-
-def _families(texts):
-    # Yield metric families from each node's document so no two documents are concatenated
-    for text in texts:
-        yield from text_string_to_metric_families(text)
-
-
-def _fill_by_ip(target, samples):
-    # Set each node's gauge value, keyed by the ip label
-    for sample in samples:
-        target[sample.labels.get("ip", "?")] = sample.value
-
-
-def _accumulate_by_ip(target, samples):
-    # Sum a per-node gauge over its sub-series, for example one series per GPU on the node
-    for sample in samples:
-        ip = sample.labels.get("ip", "?")
-        target[ip] = target.get(ip, 0.0) + sample.value
-
-
-def _accumulate_by_deployment(target, samples):
-    # Sum a Serve gauge across a deployment's replicas, keyed by the deployment label
-    for sample in samples:
-        deployment = sample.labels.get("deployment")
-        if deployment is not None:
-            target[deployment] += sample.value
 
 
 def _histogram_quantile(buckets: list[tuple[float, float]], quantile: float) -> float:
