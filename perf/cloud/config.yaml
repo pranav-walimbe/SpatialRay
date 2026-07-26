@@ -56,4 +56,3 @@ controller:
   transform_util_target: 0.7
   inference_util_target: 0.7
   decode_bytes_per_replica: 268435456 # 256 MB
-  inference_queue_per_replica: 8

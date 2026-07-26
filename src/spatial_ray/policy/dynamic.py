@@ -10,6 +10,23 @@ from math import ceil
 from spatial_ray.policy.signals import Backlog, MaxOf, Signal, Utilization
 from spatial_ray.policy.types import Action, Observation
 
+_SERVE_DEFAULT_MAX_ONGOING = 5  # Ray Serve's per-replica request cap when a pool leaves it unset
+
+
+def inference_queue_setpoint(max_ongoing_requests: int | None) -> float:
+    """Derive the per-replica queue setpoint as double the replica's batch concurrency.
+
+    Args:
+        max_ongoing_requests: The inference deployment's per-replica request cap, or None if unset.
+
+    Returns:
+        The queued-request setpoint one inference replica is sized to hold.
+    """
+    resolved = (
+        max_ongoing_requests if max_ongoing_requests is not None else _SERVE_DEFAULT_MAX_ONGOING
+    )
+    return 2 * resolved
+
 
 @dataclass(frozen=True)
 class DynamicPolicy:

@@ -4,7 +4,11 @@ Tests the dynamic policy sizes each pool from its own signal and skips unconfigu
 
 from __future__ import annotations
 
-from spatial_ray.policy.dynamic import DynamicPolicy, disaggregated_dynamic_policy
+from spatial_ray.policy.dynamic import (
+    DynamicPolicy,
+    disaggregated_dynamic_policy,
+    inference_queue_setpoint,
+)
 from spatial_ray.policy.signals import Backlog, MaxOf, Utilization
 from spatial_ray.policy.types import Observation, PoolObservation
 
@@ -25,6 +29,12 @@ def _pool(
         work_in_flight=work_in_flight,
         utilization=utilization,
     )
+
+
+def test_inference_queue_setpoint():
+    """Doubles the request cap and falls back to ten when it is unset."""
+    assert inference_queue_setpoint(16) == 32
+    assert inference_queue_setpoint(None) == 10
 
 
 def test_utilization_signal():
