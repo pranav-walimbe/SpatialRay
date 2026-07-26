@@ -16,4 +16,4 @@ def test_compile_serve_config():
     assert app["import_path"] == "perf.cloud.app:app"
     deployments = {d["name"]: d for d in app["deployments"]}
     assert list(deployments) == ["decode", "transform", "inference"]
-    assert deployments["decode"]["max_ongoing_requests"] == 64
+    assert deployments["decode"]["max_ongoing_requests"] == 8

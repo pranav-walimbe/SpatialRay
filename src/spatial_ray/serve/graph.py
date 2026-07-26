@@ -40,7 +40,7 @@ class InferenceSpec:
 
 
 DISAGGREGATED: tuple[PoolSpec, ...] = (
-    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=64, work_unit="bytes"),
+    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=8, work_unit="bytes"),
     PoolSpec(name="transform", stages=(reproject_stage, normalize, tile), work_unit="tiles"),
 )
 
@@ -96,6 +96,6 @@ def build_graph(
         .options(**deployment_options(inference))
         .bind(inference.model_factory, inference.work_unit)
     )
-    options = {"num_replicas": 2, "max_ongoing_requests": 32, **dict(ingress_options or {})}
+    options = {"num_replicas": 2, "max_ongoing_requests": 16, **dict(ingress_options or {})}
     ingress = serve.deployment(Ingress).options(name="ingress", **options)
     return ingress.bind(pools, inference_pool)
