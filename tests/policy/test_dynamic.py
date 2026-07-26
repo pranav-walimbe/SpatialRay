@@ -17,7 +17,7 @@ def _pool(
     work_in_flight: float = 0.0,
     utilization: float = 0.0,
 ) -> PoolObservation:
-    # a single pool's signals with every field defaulted so each test sets only what it exercises
+    # one pool's signals with every field defaulted
     return PoolObservation(
         name=name,
         replicas=replicas,
@@ -27,15 +27,15 @@ def _pool(
     )
 
 
-def test_utilization_signal_scales_replicas_by_the_saturation_ratio():
-    """At the setpoint demand holds current replicas, and above it demand rises proportionally."""
+def test_utilization_signal():
+    """At the setpoint replicas hold, above it demand rises proportionally."""
     signal = Utilization(target=0.5)
     assert signal.demand(_pool("t", replicas=4, utilization=0.5)) == 4.0
     assert signal.demand(_pool("t", replicas=4, utilization=1.0)) == 8.0
 
 
-def test_backlog_signal_divides_the_named_metric_by_the_per_replica_capacity():
-    """The backlog signal reads its configured field by name and ignores the other metrics."""
+def test_backlog_signal():
+    """Reads its named metric and divides by per-replica capacity."""
     bytes_signal = Backlog(per_replica=100.0, metric="work_in_flight")
     queue_signal = Backlog(per_replica=4.0, metric="queue_depth")
     pool = _pool("d", work_in_flight=250.0, queue_depth=10.0)
@@ -43,8 +43,8 @@ def test_backlog_signal_divides_the_named_metric_by_the_per_replica_capacity():
     assert queue_signal.demand(pool) == 2.5
 
 
-def test_inference_max_signal_tracks_the_hotter_of_gpu_util_and_queue():
-    """MaxOf sizes to whichever component demands more, so the busier bottleneck wins."""
+def test_max_signal():
+    """MaxOf sizes to whichever component demands more."""
     signal = MaxOf((Utilization(target=0.8), Backlog(per_replica=5.0, metric="queue_depth")))
     queue_bound = _pool("i", replicas=1, utilization=0.4, queue_depth=20.0)
     util_bound = _pool("i", replicas=4, utilization=0.8, queue_depth=1.0)
@@ -52,8 +52,8 @@ def test_inference_max_signal_tracks_the_hotter_of_gpu_util_and_queue():
     assert signal.demand(util_bound) == 4.0
 
 
-def test_decide_ceils_demand_and_targets_only_configured_present_pools():
-    """Each demand rounds up to whole replicas and pools with no signal are skipped."""
+def test_decide_ceils_and_filters():
+    """Demand rounds up and pools with no signal are skipped."""
     policy = DynamicPolicy(signals={"transform": Utilization(target=0.5)})
     observation = Observation(
         t_s=0.0,
@@ -67,8 +67,8 @@ def test_decide_ceils_demand_and_targets_only_configured_present_pools():
     assert action.targets == {"transform": 4}
 
 
-def test_decide_skips_a_configured_pool_absent_from_the_observation():
-    """A pool with a signal but no observation is left out rather than defaulted."""
+def test_decide_skips_absent_pool():
+    """A configured pool missing from the observation is left out."""
     policy = disaggregated_dynamic_policy(
         decode_bytes_per_replica=100.0, inference_queue_per_replica=4.0
     )

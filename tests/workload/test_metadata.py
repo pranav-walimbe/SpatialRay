@@ -20,8 +20,8 @@ def _band(name: str) -> BandProfile:
     )
 
 
-def test_band_map_indexes_bands_by_name():
-    """band_map keys each band profile by its asset name."""
+def test_band_map():
+    """Keys each band profile by its asset name."""
     scene = SceneRef(
         item_id="x",
         epsg=32610,

@@ -15,7 +15,7 @@ from spatial_ray.control.ray_source import (
 
 
 def _view() -> MetricsView:
-    # two transform nodes and one inference node with per-deployment work and queue gauges
+    # two transform nodes and one inference node
     return MetricsView(
         node_cpu={"t1": 40.0, "t2": 60.0, "g1": 5.0},
         node_gpu={"t1": 0.0, "t2": 0.0, "g1": 80.0},
@@ -29,16 +29,16 @@ def _kinds() -> dict[str, str | None]:
     return {"decode": None, "transform": CPU, "inference": GPU}
 
 
-def test_ewma_seeds_to_first_sample_then_blends_toward_new_values():
-    """The first sample sets the average outright and later samples pull it partway over."""
+def test_ewma():
+    """The first sample sets the average and later samples pull it over."""
     ewma = _Ewma(alpha=0.5)
     assert ewma.update(1.0) == 1.0
     assert ewma.update(0.0) == 0.5
     assert ewma.update(0.0) == 0.25
 
 
-def test_build_observation_averages_pool_nodes_and_normalizes_percent_to_fraction():
-    """Transform reads mean CPU over its two nodes and inference its GPU, each as a fraction."""
+def test_build_observation_util():
+    """Each pool reads mean util over its nodes as a fraction."""
     ewmas = {"transform": _Ewma(alpha=1.0), "inference": _Ewma(alpha=1.0)}
     observation = build_observation(9.0, _view(), {"transform": 2, "inference": 1}, _kinds(), ewmas)
     assert observation.t_s == 9.0
@@ -48,8 +48,8 @@ def test_build_observation_averages_pool_nodes_and_normalizes_percent_to_fractio
     assert observation.pools["inference"].work_in_flight == 12.0
 
 
-def test_build_observation_leaves_backlog_only_pools_without_a_utilization_signal():
-    """Decode has no utilization kind, so its utilization stays zero while work still reports."""
+def test_build_observation_backlog_only():
+    """A pool with no util kind reports work but zero utilization."""
     observation = build_observation(0.0, _view(), {"decode": 4}, _kinds(), {})
     decode = observation.pools["decode"]
     assert decode.utilization == 0.0
@@ -57,8 +57,8 @@ def test_build_observation_leaves_backlog_only_pools_without_a_utilization_signa
     assert decode.queue_depth == 0.0
 
 
-def test_observation_source_smooths_utilization_across_successive_observes():
-    """The source keeps its EWMA state between ticks so a jump in raw util arrives damped."""
+def test_source_smooths():
+    """The source keeps its EWMA state between ticks."""
     hot = MetricsView(
         node_cpu={"t1": 100.0}, node_gpu={}, work={}, queue={}, roles={"t1": "transform"}
     )
@@ -74,8 +74,8 @@ def test_observation_source_smooths_utilization_across_successive_observes():
     assert second == 1.0
 
 
-def test_observation_source_ramps_a_rising_signal_gently():
-    """Starting cold then jumping to full util, the smoother reports the damped midpoint first."""
+def test_source_ramps():
+    """A cold start jumping to full util reports a damped midpoint first."""
     views = iter(
         [
             MetricsView(

@@ -34,15 +34,15 @@ def _payload() -> RasterPayload:
     return RasterPayload(request=request)
 
 
-def test_stage_pool_runs_stages_in_order():
-    """StagePool applies its stages left to right on the payload."""
+def test_stage_pool_order():
+    """StagePool applies its stages left to right."""
     log = []
     StagePool(stages=(_mark("a", log), _mark("b", log))).run(_payload())
     assert log == ["a", "b"]
 
 
-def test_inference_pool_wraps_model_output():
-    """InferencePool returns the model output wrapped in Predictions."""
+def test_inference_pool():
+    """InferencePool wraps the model output in Predictions."""
     pool = InferencePool(model_factory=lambda: lambda tiles: tiles.sum(axis=(1, 2, 3)))
     batch = TileBatch(request=_payload().request, tiles=np.ones((3, 1, 2, 2), dtype=np.float32))
     preds = pool.infer(batch)

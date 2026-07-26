@@ -41,8 +41,8 @@ def _scene(shape: tuple[int, int]) -> SceneRef:
     )
 
 
-def test_poisson_arrivals_are_reproducible_ascending_and_scale_with_rate():
-    """poisson_arrivals is seed-reproducible, sorted ascending, and tighter at a higher rate."""
+def test_poisson_arrivals():
+    """Seed-reproducible, ascending, and tighter at a higher rate."""
     slow = poisson_arrivals(1.0, 200, random.Random(0))
     assert len(slow) == 200
     assert slow == sorted(slow)
@@ -51,8 +51,8 @@ def test_poisson_arrivals_are_reproducible_ascending_and_scale_with_rate():
     assert fast[-1] < slow[-1]
 
 
-def test_build_trace_is_reproducible_and_samples_in_bounds_windows():
-    """build_trace yields n arrival-ordered in-grid requests that repeat under the same seed."""
+def test_build_trace():
+    """Yields n arrival-ordered in-grid requests, repeatable under a seed."""
     entries = build_trace((_scene((100, 100)),), **_TRACE_KWARGS)
     assert len(entries) == _TRACE_KWARGS["n"]
     assert [e.arrival_s for e in entries] == sorted(e.arrival_s for e in entries)

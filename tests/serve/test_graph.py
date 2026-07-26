@@ -14,8 +14,8 @@ from spatial_ray.serve.graph import (
 from spatial_ray.workload.stages import decode, normalize, reproject_stage, tile
 
 
-def test_disaggregated_grouping_splits_decode_from_transforms():
-    """The default grouping isolates decode from the CPU transform stages."""
+def test_disaggregated_grouping():
+    """The default grouping isolates decode from the transform stages."""
     assert [spec.name for spec in DISAGGREGATED] == ["decode", "transform"]
     decode_pool, transform_pool = DISAGGREGATED
     assert decode_pool.stages == (decode,)
@@ -23,12 +23,12 @@ def test_disaggregated_grouping_splits_decode_from_transforms():
 
 
 def test_build_graph_binds_offline():
-    """build_graph binds the pools and inference into an application without a cluster."""
+    """Binds the pools and inference without a cluster."""
     assert build_graph(inference=InferenceSpec(model_factory=lambda: None)) is not None
 
 
-def test_deployment_options_renders_replicas_and_optional_request_cap():
-    """A static spec renders num_replicas and includes max_ongoing_requests only when set."""
+def test_options_request_cap():
+    """Renders num_replicas and includes max_ongoing_requests only when set."""
     capped = deployment_options(PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=64))
     assert capped["num_replicas"] == 1
     assert capped["max_ongoing_requests"] == 64
@@ -36,8 +36,8 @@ def test_deployment_options_renders_replicas_and_optional_request_cap():
     assert "max_ongoing_requests" not in uncapped
 
 
-def test_deployment_options_prefers_autoscaling_over_static_replicas():
-    """An autoscaling_config replaces the static num_replicas in the rendered options."""
+def test_options_autoscaling():
+    """An autoscaling_config replaces the static num_replicas."""
     spec = PoolSpec(
         name="decode",
         stages=(decode,),

@@ -25,8 +25,8 @@ def _request() -> RasterRequest:
     )
 
 
-def test_boundary_messages_round_trip_through_pickle():
-    """TileBatch and Predictions survive a pickle round-trip with arrays intact."""
+def test_messages_pickle_round_trip():
+    """TileBatch and Predictions survive a pickle round-trip."""
     batch = pickle.loads(
         pickle.dumps(TileBatch(request=_request(), tiles=np.zeros((3, 1, 2, 2), dtype=np.float32)))
     )

@@ -14,20 +14,20 @@ def _application(import_path="pkg.mod:app", app_name="spatialray"):
 
 
 def test_graph_binds_offline():
-    """The graph property binds the pools and inference into an application without a cluster."""
+    """The graph property binds the pools and inference without a cluster."""
     assert _application().graph is not None
 
 
-def test_serve_config_carries_the_applications_import_path_and_name():
-    """The compiled config re-imports the same application under the application's own name."""
+def test_serve_config_import_path():
+    """The compiled config re-imports the application under its own name."""
     config = _application(import_path="pkg.mod:app", app_name="ray_app").serve_config
     application = config["applications"][0]
     assert application["import_path"] == "pkg.mod:app"
     assert application["name"] == "ray_app"
 
 
-def test_serve_config_emits_one_deployment_per_pool_with_knobs():
-    """The compiled config lists decode, transform, and inference and carries each pool's knobs."""
+def test_serve_config_deployments():
+    """The compiled config lists one deployment per pool and carries each pool's knobs."""
     config = _application().serve_config
     deployments = {d["name"]: d for d in config["applications"][0]["deployments"]}
     assert list(deployments) == ["decode", "transform", "inference"]

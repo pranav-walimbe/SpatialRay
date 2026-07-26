@@ -32,8 +32,8 @@ def _payload() -> RasterPayload:
     return RasterPayload(request=request)
 
 
-def test_time_pipeline_reports_one_cost_per_stage():
-    """time_pipeline records a named cost for each stage in order."""
+def test_time_pipeline():
+    """Records a named cost for each stage in order."""
     _, report = time_pipeline(_payload(), (_first, _second))
     assert [cost.name for cost in report.costs] == ["_first", "_second"]
     assert all(cost.wall_s >= 0.0 for cost in report.costs)

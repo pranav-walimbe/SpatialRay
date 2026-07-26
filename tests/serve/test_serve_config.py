@@ -8,8 +8,8 @@ from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec
 from spatial_ray.serve.serve_config import compile_serve_config
 
 
-def test_compile_serve_config_emits_one_deployment_per_pool_with_knobs():
-    """The compiled app lists decode, transform, and inference and carries each pool's knobs."""
+def test_compile_serve_config():
+    """Lists one deployment per pool and carries each pool's knobs."""
     inference = InferenceSpec(model_factory=lambda: None)
     config = compile_serve_config(DISAGGREGATED, inference, import_path="perf.cloud.app:app")
     app = config["applications"][0]

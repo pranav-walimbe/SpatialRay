@@ -48,8 +48,8 @@ def _payload(bands: tuple[BandProfile, ...], *, tile_size: int = 2) -> RasterPay
     return RasterPayload(request=request)
 
 
-def test_normalize_scales_clips_and_zeros_nodata():
-    """Scales digital numbers, clips to [0, 1], and zeros nodata pixels."""
+def test_normalize():
+    """Scales digital numbers, clips to [0, 1], and zeros nodata."""
     payload = _payload((_band("red", scale=0.0001),))
     payload.array = np.array([[[0, 10000, 20000]]], dtype=np.uint16)
     normalize(payload)
@@ -57,8 +57,8 @@ def test_normalize_scales_clips_and_zeros_nodata():
     assert np.allclose(payload.array, np.array([[[0.0, 1.0, 1.0]]], dtype=np.float32))
 
 
-def test_tile_cuts_row_major_blocks():
-    """Cuts the array into row-major square tiles of the requested size."""
+def test_tile():
+    """Cuts the array into row-major square tiles."""
     payload = _payload((_band("red"),), tile_size=2)
     payload.array = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
     tile(payload)
@@ -67,22 +67,22 @@ def test_tile_cuts_row_major_blocks():
     assert np.array_equal(payload.tiles[3, 0], [[10, 11], [14, 15]])
 
 
-def test_align_to_blocks_is_a_no_op_for_an_already_aligned_window():
-    """A window that already sits on block boundaries is returned unchanged."""
+def test_align_to_blocks_noop():
+    """An already-aligned window is returned unchanged."""
     window = Window(512, 1024, 512, 512)
     assert _align_to_blocks(window, (512, 512)) == window
 
 
-def test_align_to_blocks_snaps_outward_to_the_block_grid():
-    """An unaligned window is expanded outward to the nearest full blocks."""
+def test_align_to_blocks_snaps():
+    """An unaligned window expands outward to full blocks."""
     window = Window(600, 100, 200, 50)
     aligned = _align_to_blocks(window, (512, 512))
     assert (aligned.col_off, aligned.row_off) == (512, 0)
     assert (aligned.width, aligned.height) == (512, 512)
 
 
-def test_reproject_changes_crs_and_preserves_bands():
-    """reproject_stage warps into the target CRS while keeping the band count."""
+def test_reproject():
+    """Warps into the target CRS while keeping the band count."""
     payload = _payload((_band("red"),))
     payload.array = np.ones((1, 16, 16), dtype=np.float32)
     payload.epsg = 32610

@@ -13,13 +13,13 @@ from spatial_ray.serve.serve_config import compile_serve_config
 
 
 def _config() -> dict[str, Any]:
-    # a real compiled serveConfigV2 so patching and schema validation see production shape
+    # a real compiled serveConfigV2
     inference = InferenceSpec(model_factory=lambda: None)
     return compile_serve_config(DISAGGREGATED, inference, import_path="perf.cloud.app:app")
 
 
 class _FakeClient:
-    # captures the schema handed to deploy_apps in place of a live Serve controller
+    # captures the schema handed to deploy_apps
     def __init__(self) -> None:
         self.submitted: Any = None
         self.blocking: bool | None = None
@@ -29,8 +29,8 @@ class _FakeClient:
         self.blocking = _blocking
 
 
-def test_patch_overrides_named_replicas_drops_autoscaling_and_leaves_the_source_intact():
-    """Only named deployments change, their autoscaling is dropped, and the input is not mutated."""
+def test_patch_targets():
+    """Patches only named deployments, drops their autoscaling, keeps the input."""
     config = _config()
     config["applications"][0]["deployments"][0]["autoscaling_config"] = {"min_replicas": 1}
     patched = patch_replica_targets(config, {"decode": 5})
@@ -41,8 +41,8 @@ def test_patch_overrides_named_replicas_drops_autoscaling_and_leaves_the_source_
     assert config["applications"][0]["deployments"][0]["autoscaling_config"] == {"min_replicas": 1}
 
 
-def test_apply_patches_forward_and_submits_a_valid_non_blocking_schema():
-    """Successive applies accumulate onto the held config and each submit validates as a schema."""
+def test_apply_accumulates():
+    """Successive applies accumulate on the held config and submit a valid schema."""
     client = _FakeClient()
     actuator = RayActuator(_config(), client=client)
     actuator.apply(Action(targets={"decode": 4}))

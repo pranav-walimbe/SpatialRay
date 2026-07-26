@@ -9,8 +9,8 @@ from spatial_ray.control.bounds import PoolBounds
 from spatial_ray.policy.signals import Backlog, MaxOf, Utilization
 
 
-def test_pool_bounds_reads_min_and_max_replicas_per_pool():
-    """Each pool's config budget becomes its clamp bounds keyed by pool name."""
+def test_pool_bounds():
+    """Each pool's config budget becomes its clamp bounds."""
     bounds = pool_bounds(
         {
             "decode": {"min_replicas": 1, "max_replicas": 8},
@@ -21,8 +21,8 @@ def test_pool_bounds_reads_min_and_max_replicas_per_pool():
     assert bounds["inference"] == PoolBounds(min_replicas=1, max_replicas=3)
 
 
-def test_build_policy_wires_each_pool_to_its_configured_bottleneck_signal():
-    """Decode reads work-in-flight, transform reads its util target, and inference maxes both."""
+def test_build_policy_signals():
+    """Decode reads backlog, transform reads util, inference maxes both."""
     policy = build_policy(
         {
             "decode_bytes_per_replica": 1000.0,

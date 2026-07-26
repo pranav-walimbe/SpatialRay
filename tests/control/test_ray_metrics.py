@@ -10,7 +10,7 @@ from spatial_ray.control.ray_metrics import parse_metrics_view
 
 
 def _node_a() -> str:
-    # one scrape document for a node hosting the two transform CPUs and the inference GPU
+    # scrape for a node with two transform CPUs and the inference GPU
     registry = CollectorRegistry()
     cpu = Gauge("ray_node_cpu_utilization", "cpu", ["ip"], registry=registry)
     cpu.labels(ip="t1").set(40.0)
@@ -24,7 +24,7 @@ def _node_a() -> str:
 
 
 def _node_b() -> str:
-    # a second node's scrape carrying decode work and another inference replica's queue
+    # second node's scrape with decode work and an inference queue
     registry = CollectorRegistry()
     work = Gauge(
         "ray_spatialray_work_in_flight", "w", ["deployment", "work_unit"], registry=registry
@@ -35,8 +35,8 @@ def _node_b() -> str:
     return generate_latest(registry).decode()
 
 
-def test_parse_metrics_view_sums_gpu_series_and_deployment_replicas_across_nodes():
-    """Per-node CPU takes its value, GPUs on a node sum, and a deployment sums over both nodes."""
+def test_parse_metrics_view():
+    """Per-node CPU is kept, GPUs on a node sum, a deployment sums across nodes."""
     roles = {"t1": "transform", "t2": "transform", "g1": "inference"}
     view = parse_metrics_view([_node_a(), _node_b()], roles)
     assert view.node_cpu == {"t1": 40.0, "t2": 60.0}

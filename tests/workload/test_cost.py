@@ -46,14 +46,14 @@ def _request(
     )
 
 
-def test_decoded_bytes_sums_per_band_itemsize():
-    """decoded_bytes multiplies the window area by the summed per-band itemsize."""
+def test_decoded_bytes():
+    """Multiplies window area by the summed per-band itemsize."""
     request = _request((_band("red", "uint16"), _band("nir", "float32")), ("red", "nir"))
     assert decoded_bytes(request) == 256 * 256 * (2 + 4)
 
 
-def test_predicted_tiles_counts_whole_tiles_and_scales_with_tile_size():
-    """predicted_tiles cuts the same-CRS window into whole tiles that quadruple as size halves."""
+def test_predicted_tiles():
+    """Cuts the window into whole tiles that quadruple as size halves."""
     coarse = _request((_band("red", "uint16"),), ("red",), target_epsg=32610, tile_size=64)
     fine = _request((_band("red", "uint16"),), ("red",), target_epsg=32610, tile_size=32)
     assert predicted_tiles(coarse) == (256 // 64) ** 2

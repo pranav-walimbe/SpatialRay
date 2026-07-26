@@ -12,7 +12,7 @@ from spatial_ray.workload.catalog import scene_from_item
 
 
 def _item() -> Item:
-    # a STAC item carrying the proj and raster extension fields scene_from_item reads
+    # a STAC item with the proj and raster extension fields
     red = Asset(
         href="https://example.com/red.tif",
         extra_fields={
@@ -33,8 +33,8 @@ def _item() -> Item:
     return item
 
 
-def test_scene_from_item_maps_projection_and_band_radiometry():
-    """scene_from_item reads the EPSG code, native grid, and per-band radiometry from the item."""
+def test_scene_from_item():
+    """Reads the EPSG, native grid, and per-band radiometry from the item."""
     scene = scene_from_item(_item(), band_names=("red",))
     assert scene.item_id == "S2A_10SEH_20230708_0_L2A"
     assert scene.epsg == 32610
