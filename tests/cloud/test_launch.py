@@ -32,7 +32,7 @@ def test_build_policy_signals():
         application,
     )
     decode, transform, inference_signal = (
-        policy.signals[name] for name in ("decode", "transform", "inference")
+        policy.inner.signals[name] for name in ("decode", "transform", "inference")
     )
     assert isinstance(decode, AdaptiveBacklog) and decode.max_ongoing_requests == 32
     assert isinstance(transform, Utilization) and transform.target == 0.7
