@@ -49,7 +49,18 @@ def test_build_observation_util():
     assert observation.pools["inference"].work_in_flight == 12.0
 
 
-def test_build_observation_backlog_only():
+def test_util_per_replica_ignores_idle_nodes():
+    """Dividing by replicas keeps an idle provisioned node from diluting utilization."""
+    view = MetricsView(
+        node_cpu={},
+        node_gpu={"g1": 90.0, "g2": 0.0},
+        work={},
+        queue={},
+        roles={"g1": "inference", "g2": "inference"},
+    )
+    ewmas = {"inference": _Ewma(alpha=1.0)}
+    observation = build_observation(0.0, view, {"inference": 1}, {"inference": GPU}, ewmas)
+    assert observation.pools["inference"].utilization == 0.90
     """A pool with no util kind reports work but zero utilization."""
     observation = build_observation(0.0, _view(), {"decode": 4}, _kinds(), {})
     decode = observation.pools["decode"]

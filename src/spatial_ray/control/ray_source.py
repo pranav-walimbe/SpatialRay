@@ -47,15 +47,13 @@ class _Ewma:
         return self._value
 
 
-def _pool_utilization(pool: str, kind: str | None, view: MetricsView) -> float:
-    # mean utilization over the pool's nodes, normalized from a percent to a 0-to-1 fraction
-    if kind is None:
-        return 0.0
-    ips = [ip for ip, role in view.roles.items() if role == pool]
-    if not ips:
+def _pool_utilization(pool: str, kind: str | None, view: MetricsView, replicas: int) -> float:
+    # the pool's summed node utilization divided per replica and normalized to a 0-to-1 fraction
+    if kind is None or replicas <= 0:
         return 0.0
     source = view.node_gpu if kind == GPU else view.node_cpu
-    return sum(source.get(ip, 0.0) for ip in ips) / len(ips) / 100.0
+    ips = [ip for ip, role in view.roles.items() if role == pool]
+    return sum(source.get(ip, 0.0) for ip in ips) / replicas / 100.0
 
 
 def build_observation(
@@ -81,7 +79,7 @@ def build_observation(
     """
     pools: dict[str, PoolObservation] = {}
     for name, count in replicas.items():
-        raw = _pool_utilization(name, util_kinds.get(name), view)
+        raw = _pool_utilization(name, util_kinds.get(name), view, count)
         smoothed = ewmas[name].update(raw) if name in ewmas else raw
         pools[name] = PoolObservation(
             name=name,

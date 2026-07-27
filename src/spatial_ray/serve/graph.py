@@ -40,7 +40,7 @@ class InferenceSpec:
 
 
 DISAGGREGATED: tuple[PoolSpec, ...] = (
-    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=8, work_unit="bytes"),
+    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=32, work_unit="bytes"),
     PoolSpec(name="transform", stages=(reproject_stage, normalize, tile), work_unit="tiles"),
 )
 

@@ -31,4 +31,4 @@ def test_serve_config_deployments():
     config = _application().serve_config
     deployments = {d["name"]: d for d in config["applications"][0]["deployments"]}
     assert list(deployments) == ["decode", "transform", "inference"]
-    assert deployments["decode"]["max_ongoing_requests"] == 8
+    assert deployments["decode"]["max_ongoing_requests"] == 32
