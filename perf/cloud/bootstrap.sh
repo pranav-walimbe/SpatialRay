@@ -71,6 +71,8 @@ mkdir -p /data/scratch
 # /tmp is tmpfs (RAM) on these AMIs so spill the per-stage scratch to the EBS data volume
 export TMPDIR=/data/scratch
 export AWS_DEFAULT_REGION="$REGION"
+export SPATIALRAY_MODEL="$MODEL"
+export SPATIALRAY_HARDWARE="$HARDWARE"
 
 # this node's private ip via IMDSv2
 TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
