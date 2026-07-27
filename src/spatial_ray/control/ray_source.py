@@ -106,7 +106,7 @@ def serve_replica_counts(app_name: str = "spatialray") -> dict[str, int]:
     if application is None:
         return {}
     return {
-        name: sum(1 for replica in deployment.replicas if str(replica.state) == "RUNNING")
+        name: deployment.replica_states.get("RUNNING", 0)
         for name, deployment in application.deployments.items()
     }
 
