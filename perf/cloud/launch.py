@@ -183,7 +183,13 @@ def _wait_for_success(s3, ec2, cfg, run_id, instance_ids):
 
 def _dead_nodes(ec2, instance_ids):
     # Instance ids no longer pending or running, a node that died before writing _SUCCESS
-    reservations = ec2.describe_instances(InstanceIds=instance_ids)["Reservations"]
+    try:
+        reservations = ec2.describe_instances(InstanceIds=instance_ids)["Reservations"]
+    except ClientError as error:
+        # a just-launched id can briefly 404 from EC2 eventual consistency so skip this poll
+        if error.response["Error"]["Code"] == "InvalidInstanceID.NotFound":
+            return []
+        raise
     return [
         instance["InstanceId"]
         for reservation in reservations
