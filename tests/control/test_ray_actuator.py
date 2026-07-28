@@ -53,3 +53,13 @@ def test_apply_accumulates():
     second = {d.name: d for d in client.submitted.applications[0].deployments}
     assert second["decode"].num_replicas == 4
     assert second["inference"].num_replicas == 3
+
+
+def test_apply_skips_unchanged():
+    """Re-applying the same targets does not re-submit the config."""
+    client = _FakeClient()
+    actuator = RayActuator(_config(), client=client)
+    actuator.apply(Action(targets={"decode": 4}))
+    client.submitted = None
+    actuator.apply(Action(targets={"decode": 4}))
+    assert client.submitted is None

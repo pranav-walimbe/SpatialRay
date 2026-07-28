@@ -45,13 +45,23 @@ class Controller:
         """Run one observe then decide then reconcile then apply cycle.
 
         Returns:
-            The reconciled action that was applied after anti-flap clamping.
+            The reconciled action applied or the raw proposal while a pool is still cold-starting.
         """
         observation = self._source.observe()
         proposed = self._policy.decide(observation)
+        if not self._ready(observation):
+            return proposed
         applied = self.reconcile(observation, proposed)
         self._actuator.apply(applied)
         return applied
+
+    def _ready(self, observation: Observation) -> bool:
+        # a pool below its replica floor is still cold-starting so hold off scaling until it is up
+        for name, bounds in self._bounds.items():
+            pool = observation.pools.get(name)
+            if pool is None or pool.replicas < bounds.min_replicas:
+                return False
+        return True
 
     def reconcile(self, observation: Observation, proposed: Action) -> Action:
         """Clamp a policy's raw targets through the deadband, step cap, cooldowns, and bounds.

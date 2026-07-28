@@ -40,13 +40,18 @@ class RayActuator:
         # holds the last submitted config so each apply patches forward from the current desire
         self._config = copy.deepcopy(config)
         self._client = client
+        # last-applied targets so an unchanged action skips the redundant redeploy
+        self._targets: dict[str, int] = {}
 
     def apply(self, action: Action) -> None:
-        """Patch the held config with the action's targets and submit it for incremental reconcile.
+        """Patch the held config with the action's targets and submit it only when they change.
 
         Args:
             action: The desired num_replicas for each pool to reconcile toward.
         """
+        if action.targets == self._targets:
+            return
+        self._targets = dict(action.targets)
         self._config = patch_replica_targets(self._config, action.targets)
         client = self._client if self._client is not None else _get_global_client()
         client.deploy_apps(ServeDeploySchema.model_validate(self._config), _blocking=False)

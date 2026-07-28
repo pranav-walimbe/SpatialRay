@@ -28,6 +28,11 @@ class _FakeSource:
         return _obs(2)
 
 
+class _ColdSource:
+    def observe(self):
+        return _obs(0)
+
+
 class _FakePolicy:
     def decide(self, observation):
         return Action(targets={"p": 5})
@@ -73,3 +78,12 @@ def test_tick_applies():
     applied = controller.tick()
     assert applied.targets["p"] == 3
     assert controller._actuator.applied is applied
+
+
+def test_cold_start_tick_skips_apply():
+    """A pool below its replica floor holds off scaling and applies nothing."""
+    bounds = {"p": PoolBounds(min_replicas=1, max_replicas=5, max_step=1)}
+    controller = Controller(_ColdSource(), _FakePolicy(), _FakeActuator(), bounds)
+    proposed = controller.tick()
+    assert proposed.targets["p"] == 5
+    assert controller._actuator.applied is None
