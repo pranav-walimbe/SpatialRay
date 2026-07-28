@@ -43,3 +43,14 @@ def test_scene_from_item():
     (band,) = scene.bands
     assert band.href == "https://example.com/red.tif"
     assert (band.data_type, band.scale, band.offset, band.gsd) == ("uint16", 0.0001, -0.1, 10.0)
+
+
+def test_scene_from_item_epsg_fallbacks():
+    """Falls back to the deprecated integer proj:epsg and to proj:code on the reference asset."""
+    epsg_item = _item()
+    epsg_item.properties = {"proj:epsg": 32610}
+    assert scene_from_item(epsg_item, band_names=("red",)).epsg == 32610
+    asset_item = _item()
+    asset_item.properties = {}
+    asset_item.assets["red"].extra_fields["proj:code"] = "EPSG:32610"
+    assert scene_from_item(asset_item, band_names=("red",)).epsg == 32610

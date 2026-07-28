@@ -55,7 +55,7 @@ def scene_from_item(
     """
     ref_name = reference_band if reference_band is not None else band_names[0]
     ref = item.assets[ref_name].extra_fields
-    epsg = _parse_epsg(item.properties["proj:code"])
+    epsg = _scene_epsg(item, ref)
     shape = tuple(ref["proj:shape"])
     transform = tuple(ref["proj:transform"])
     bands = tuple(_band_profile(item, name) for name in band_names)
@@ -75,6 +75,18 @@ def _band_profile(item: Item, name: str) -> BandProfile:
         offset=float(raster.get("offset", 0.0)),
         gsd=float(asset.extra_fields["gsd"]),
     )
+
+
+def _scene_epsg(item: Item, ref: dict) -> int:
+    # read the EPSG code from the proj extension tolerating both the proj:code and proj:epsg forms
+    for source in (ref, item.properties):
+        code = source.get("proj:code")
+        if code is not None:
+            return _parse_epsg(code)
+        epsg = source.get("proj:epsg")
+        if epsg is not None:
+            return int(epsg)
+    raise KeyError("no proj:code or proj:epsg on the reference asset or item properties")
 
 
 def _parse_epsg(proj_code: str) -> int:
