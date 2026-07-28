@@ -116,11 +116,16 @@ def _take_snapshot(endpoints, start):
 
 
 async def _drive(handle, trace, start):
-    # fire each request at its arrival time and await every response
+    # fire and await each request at its arrival time so one failure cannot cancel the others
     async def _fire(entry):
         delay = (start + entry.arrival_s) - time.perf_counter()
         if delay > 0:
             await asyncio.sleep(delay)
         await handle.remote(entry.request)
 
-    await asyncio.gather(*(asyncio.create_task(_fire(entry)) for entry in trace))
+    results = await asyncio.gather(
+        *(asyncio.create_task(_fire(entry)) for entry in trace), return_exceptions=True
+    )
+    failures = [r for r in results if isinstance(r, Exception)]
+    if failures:
+        print(f"{len(failures)}/{len(results)} requests failed, first: {failures[0]!r}")
