@@ -83,7 +83,8 @@ def save_text_report(report: Report, path) -> None:
         gpu_rows,
     )
     lines += _reduced_section("Node memory (GiB)", report, "node_mem", report.roles, _GIB)
-    lines += _reduced_section("Queue depth (requests)", report, "queue", None)
+    lines += _reduced_section("Processing at replicas (requests)", report, "queue", None)
+    lines += _reduced_section("Queued at routers (requests)", report, "queued", None)
 
     # per-pool work in flight labeled by unit with bytes pools reduced to MiB
     work_rows = []

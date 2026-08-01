@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
-from spatial_ray.control.ray_metrics import parse_metrics_view
+from spatial_ray.control.ray_metrics import Scrape, parse_metrics_view
 
 
 def _node_a() -> str:
@@ -34,16 +34,34 @@ def _node_b() -> str:
     mean.labels(deployment="decode").set(512.0)
     queue = Gauge("ray_serve_replica_processing_queries", "q", ["deployment"], registry=registry)
     queue.labels(deployment="inference").set(3.0)
+    queued = Gauge(
+        "ray_serve_deployment_queued_queries", "qd", ["deployment", "handle"], registry=registry
+    )
+    queued.labels(deployment="decode", handle="h1").set(12.0)
+    queued.labels(deployment="decode", handle="h2").set(8.0)
     return generate_latest(registry).decode()
 
 
+def _scrape(*texts: str) -> Scrape:
+    # a whole scrape of the given exposition documents
+    return Scrape(texts=texts, failed=())
+
+
 def test_parse_metrics_view():
-    """Per-node CPU is kept, GPUs on a node sum, a deployment sums across nodes."""
+    """Per-node CPU is kept, GPUs on a node sum, a deployment sums across nodes and handles."""
     roles = {"t1": "transform", "t2": "transform", "g1": "inference"}
-    view = parse_metrics_view([_node_a(), _node_b()], roles)
+    view = parse_metrics_view(_scrape(_node_a(), _node_b()), roles)
     assert view.node_cpu == {"t1": 40.0, "t2": 60.0}
     assert view.node_gpu == {"g1": 80.0}
     assert view.work == {"decode": 1024.0}
     assert view.mean_bytes == {"decode": 512.0}
     assert view.queue == {"inference": 7.0}
+    assert view.queued == {"decode": 20.0}
     assert view.roles == roles
+    assert view.complete
+
+
+def test_parse_metrics_view_partial():
+    """A scrape missing an endpoint is flagged incomplete so absent gauges are not read as zero."""
+    view = parse_metrics_view(Scrape(texts=(_node_a(),), failed=("http://b:8080/metrics",)), {})
+    assert not view.complete

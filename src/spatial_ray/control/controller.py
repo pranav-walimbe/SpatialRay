@@ -5,6 +5,7 @@ The control loop owning the clock and tying observe to decide to apply with anti
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Mapping
 
 from spatial_ray.control.bounds import PoolBounds
@@ -15,6 +16,8 @@ DEFAULT_TICK_S = 12.0
 DEFAULT_DEADBAND = 0.10
 DEFAULT_SCALE_UP_COOLDOWN_S = 0.0
 DEFAULT_SCALE_DOWN_COOLDOWN_S = 60.0
+DEFAULT_WARMUP_S = 60.0
+DEFAULT_MAX_STALE_S = 36.0
 
 
 class Controller:
@@ -29,6 +32,8 @@ class Controller:
         deadband: float = DEFAULT_DEADBAND,
         scale_up_cooldown_s: float = DEFAULT_SCALE_UP_COOLDOWN_S,
         scale_down_cooldown_s: float = DEFAULT_SCALE_DOWN_COOLDOWN_S,
+        warmup_s: float = DEFAULT_WARMUP_S,
+        max_stale_s: float = DEFAULT_MAX_STALE_S,
     ) -> None:
         self._source = source
         self._policy = policy
@@ -38,18 +43,23 @@ class Controller:
         self._deadband = deadband
         self._scale_up_cooldown_s = scale_up_cooldown_s
         self._scale_down_cooldown_s = scale_down_cooldown_s
+        self._warmup_s = warmup_s
+        self._max_stale_s = max_stale_s
         self._last_change_t: dict[str, float] = {}
         self._stop = threading.Event()
 
-    def tick(self) -> Action:
+    def tick(self, *, act: bool = True) -> Action:
         """Run one observe then decide then reconcile then apply cycle.
 
+        Args:
+            act: Whether to scale, false during warmup so idle-but-running pools are not shrunk.
+
         Returns:
-            The reconciled action applied or the raw proposal while a pool is still cold-starting.
+            The reconciled action applied or the raw proposal while warming up or cold-starting.
         """
         observation = self._source.observe()
         proposed = self._policy.decide(observation)
-        if not self._ready(observation):
+        if not act or not self._ready(observation):
             return proposed
         applied = self.reconcile(observation, proposed)
         self._actuator.apply(applied)
@@ -71,19 +81,23 @@ class Controller:
             proposed: The policy's raw per-pool replica targets.
 
         Returns:
-            An action whose targets honor each pool's anti-flap tuning and hard budget bounds.
+            An action honoring each pool's anti-flap tuning and bounds, holding the stale ones put.
         """
         targets: dict[str, int] = {}
         for name, desired in proposed.targets.items():
-            current = observation.pools[name].replicas
-            targets[name] = self._reconcile_pool(name, current, desired, observation.t_s)
+            pool = observation.pools[name]
+            if pool.stale_s > self._max_stale_s:
+                targets[name] = pool.replicas
+                continue
+            targets[name] = self._reconcile_pool(name, pool.replicas, desired, observation.t_s)
         return Action(targets=targets)
 
     def run(self) -> None:
         """Loop observe then decide then apply on the tick cadence until stopped."""
         self._stop.clear()
+        warmup_deadline = time.monotonic() + self._warmup_s
         while not self._stop.is_set():
-            self.tick()
+            self.tick(act=time.monotonic() >= warmup_deadline)
             self._stop.wait(self._tick_s)
 
     def stop(self) -> None:

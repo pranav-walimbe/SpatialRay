@@ -9,7 +9,7 @@ from spatial_ray.policy.dynamic import (
     disaggregated_dynamic_policy,
     inference_queue_setpoint,
 )
-from spatial_ray.policy.signals import AdaptiveBacklog, Backlog, MaxOf, Utilization
+from spatial_ray.policy.signals import AdaptiveBacklog, Backlog, MaxOf, TotalBacklog, Utilization
 from spatial_ray.policy.types import Observation, PoolObservation
 
 
@@ -21,6 +21,7 @@ def _pool(
     work_in_flight: float = 0.0,
     utilization: float = 0.0,
     mean_decoded_bytes: float = 0.0,
+    queued_depth: float = 0.0,
 ) -> PoolObservation:
     # one pool's signals with every field defaulted
     return PoolObservation(
@@ -30,6 +31,7 @@ def _pool(
         work_in_flight=work_in_flight,
         utilization=utilization,
         mean_decoded_bytes=mean_decoded_bytes,
+        queued_depth=queued_depth,
     )
 
 
@@ -86,17 +88,29 @@ def test_decide_ceils_and_filters():
     assert action.targets == {"transform": 4}
 
 
+def test_total_backlog_signal():
+    """Running and router-queued requests both count toward the per-replica target."""
+    signal = TotalBacklog(target_ongoing_requests=8.0)
+    assert signal.demand(_pool("d", queue_depth=16.0, queued_depth=0.0)) == 2.0
+    assert signal.demand(_pool("d", queue_depth=16.0, queued_depth=48.0)) == 8.0
+
+
+def test_total_backlog_exceeds_current_replicas():
+    """Router-queued demand lets decode ask for more replicas than it already runs."""
+    signal = TotalBacklog(target_ongoing_requests=8.0)
+    pool = _pool("decode", replicas=1, queue_depth=8.0, queued_depth=56.0)
+    assert signal.demand(pool) == 8.0 > pool.replicas
+
+
 def test_decide_skips_absent_pool():
     """A configured pool missing from the observation is left out."""
     policy = disaggregated_dynamic_policy(
-        decode_max_ongoing_requests=2, inference_queue_per_replica=4.0
+        decode_target_ongoing_requests=8.0, inference_queue_per_replica=4.0
     )
     observation = Observation(
         t_s=0.0,
         arrival_rate=1.0,
-        pools={
-            "decode": _pool("decode", replicas=2, work_in_flight=350.0, mean_decoded_bytes=50.0)
-        },
+        pools={"decode": _pool("decode", replicas=2, queue_depth=16.0, queued_depth=12.0)},
     )
     action = policy.decide(observation)
     assert action.targets == {"decode": 4}

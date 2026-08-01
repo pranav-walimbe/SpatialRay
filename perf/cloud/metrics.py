@@ -15,7 +15,9 @@ from spatial_ray.control.ray_metrics import (
     NODE_GRAM,
     NODE_MEM,
     QUEUE,
+    QUEUED,
     WORK,
+    Scrape,
     reduce_families,
 )
 
@@ -29,6 +31,7 @@ _SNAPSHOT_SPECS = {
     NODE_MEM: ("ip", "last"),
     WORK: ("deployment", "sum"),
     QUEUE: ("deployment", "sum"),
+    QUEUED: ("deployment", "sum"),
 }
 
 
@@ -41,19 +44,20 @@ class Snapshot:
     node_mem: dict[str, float]  # node ip to system memory used in bytes
     work: dict[str, float]  # deployment to work units in flight from our custom gauge
     queue: dict[str, float]  # deployment to queries being processed across its replicas
+    queued: dict[str, float]  # deployment to queries waiting at the routers for a replica
 
 
-def parse_snapshot(texts: list[str], t_s: float) -> Snapshot:
+def parse_snapshot(scraped: Scrape, t_s: float) -> Snapshot:
     """Reduce one scrape into a timestamped snapshot of the hardware and Serve gauges we plot.
 
     Args:
-        texts: Per-node Prometheus exposition documents scraped from the cluster.
+        scraped: The exposition documents that answered plus the endpoints that did not.
         t_s: Seconds since the run started, stamped onto the snapshot.
 
     Returns:
-        A Snapshot holding per-node hardware gauges and per-deployment work and queue depth.
+        A Snapshot holding per-node hardware gauges and per-deployment work and backlog.
     """
-    reduced = reduce_families(texts, _SNAPSHOT_SPECS)
+    reduced = reduce_families(list(scraped.texts), _SNAPSHOT_SPECS)
     return Snapshot(
         t_s=t_s,
         node_cpu=reduced[NODE_CPU],
@@ -62,6 +66,7 @@ def parse_snapshot(texts: list[str], t_s: float) -> Snapshot:
         node_mem=reduced[NODE_MEM],
         work=reduced[WORK],
         queue=reduced[QUEUE],
+        queued=reduced[QUEUED],
     )
 
 

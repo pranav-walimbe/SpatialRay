@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import urllib.request
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import ray
 from prometheus_client.parser import text_string_to_metric_families
 
-_SCRAPE_TIMEOUT_S = 5
+_SCRAPE_TIMEOUT_S = 2
 _NODE_RESOURCE_SUFFIX = "_node"
 
 # Prometheus family names shared by the control loop and the perf harness
@@ -21,6 +22,7 @@ NODE_GRAM = "ray_node_gram_used"
 NODE_MEM = "ray_node_mem_used"
 WORK = "ray_spatialray_work_in_flight"
 QUEUE = "ray_serve_replica_processing_queries"
+QUEUED = "ray_serve_deployment_queued_queries"
 MEAN_BYTES = "ray_spatialray_mean_decoded_bytes"
 
 # per-family reduction the observation view reads, each family with its label and aggregation
@@ -29,8 +31,24 @@ _VIEW_SPECS = {
     NODE_GPU: ("ip", "sum"),
     WORK: ("deployment", "sum"),
     QUEUE: ("deployment", "sum"),
+    QUEUED: ("deployment", "sum"),
     MEAN_BYTES: ("deployment", "last"),
 }
+
+
+@dataclass(frozen=True)
+class Scrape:
+    texts: tuple[str, ...]  # exposition document from each endpoint that answered
+    failed: tuple[str, ...]  # endpoints that did not answer so their gauges are absent not zero
+
+    @property
+    def complete(self) -> bool:
+        """Whether every endpoint answered so a missing gauge really means zero.
+
+        Returns:
+            True when no endpoint was skipped.
+        """
+        return not self.failed
 
 
 @dataclass(frozen=True)
@@ -38,11 +56,15 @@ class MetricsView:
     node_cpu: dict[str, float]  # node ip to CPU utilization percent
     node_gpu: dict[str, float]  # node ip to summed GPU utilization percent
     work: dict[str, float]  # deployment to work units in flight from our custom gauge
-    queue: dict[str, float]  # deployment to queued and processing queries across its replicas
+    queue: dict[str, float]  # deployment to queries being processed across its replicas
     roles: dict[str, str]  # node ip to the pool that node hosts
     mean_bytes: dict[str, float] = field(
         default_factory=dict
     )  # deployment to its EWMA decoded bytes per request
+    queued: dict[str, float] = field(
+        default_factory=dict
+    )  # deployment to queries waiting at the routers for a replica
+    complete: bool = True  # whether every endpoint answered so a missing gauge means zero load
 
 
 def metrics_endpoints() -> list[str]:
@@ -85,23 +107,32 @@ def node_roles() -> dict[str, str]:
     return roles
 
 
-def scrape(endpoints: list[str]) -> list[str]:
-    """Fetch the Prometheus exposition text from each reachable endpoint.
+def scrape(endpoints: list[str]) -> Scrape:
+    """Fetch the Prometheus exposition text from every endpoint at once.
 
     Args:
-        endpoints: Node /metrics URLs to scrape, unreachable ones are skipped.
+        endpoints: Node /metrics URLs to scrape.
 
     Returns:
-        One exposition document per reachable endpoint, kept separate so each parses on its own.
+        A Scrape holding the documents that answered and the endpoints that did not.
     """
-    texts = []
-    for url in endpoints:
-        try:
-            with urllib.request.urlopen(url, timeout=_SCRAPE_TIMEOUT_S) as response:
-                texts.append(response.read().decode())
-        except OSError:
-            continue
-    return texts
+    if not endpoints:
+        return Scrape(texts=(), failed=())
+    with ThreadPoolExecutor(max_workers=len(endpoints)) as pool:
+        fetched = tuple(pool.map(_fetch, endpoints))
+    return Scrape(
+        texts=tuple(text for text in fetched if text is not None),
+        failed=tuple(url for url, text in zip(endpoints, fetched, strict=True) if text is None),
+    )
+
+
+def _fetch(url: str) -> str | None:
+    # one endpoint's exposition text or None when it times out or refuses
+    try:
+        with urllib.request.urlopen(url, timeout=_SCRAPE_TIMEOUT_S) as response:
+            return response.read().decode()
+    except OSError:
+        return None
 
 
 def reduce_families(
@@ -135,17 +166,20 @@ def reduce_families(
     return reduced
 
 
-def parse_metrics_view(texts: list[str], roles: Mapping[str, str]) -> MetricsView:
+def parse_metrics_view(
+    scraped: Scrape, roles: Mapping[str, str], *, complete: bool | None = None
+) -> MetricsView:
     """Reduce one scrape into the per-node and per-deployment gauges an observation reads.
 
     Args:
-        texts: Per-node Prometheus exposition documents scraped from the cluster.
+        scraped: The documents that answered plus the endpoints that did not.
         roles: Node ip to the pool it hosts, carried through onto the view.
+        complete: Override for whether the scrape was whole, defaulting to the scrape's own verdict.
 
     Returns:
-        A MetricsView holding per-node CPU and GPU utilization and per-deployment work and queue.
+        A MetricsView of the node and deployment gauges, flagged with whether the scrape was whole.
     """
-    reduced = reduce_families(texts, _VIEW_SPECS)
+    reduced = reduce_families(list(scraped.texts), _VIEW_SPECS)
     return MetricsView(
         node_cpu=reduced[NODE_CPU],
         node_gpu=reduced[NODE_GPU],
@@ -153,6 +187,8 @@ def parse_metrics_view(texts: list[str], roles: Mapping[str, str]) -> MetricsVie
         queue=reduced[QUEUE],
         roles=dict(roles),
         mean_bytes=reduced[MEAN_BYTES],
+        queued=reduced[QUEUED],
+        complete=scraped.complete if complete is None else complete,
     )
 
 

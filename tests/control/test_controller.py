@@ -9,10 +9,15 @@ from spatial_ray.control.controller import Controller
 from spatial_ray.policy.types import Action, Observation, PoolObservation
 
 
-def _obs(replicas, t_s=0.0):
+def _obs(replicas, t_s=0.0, stale_s=0.0):
     # one-pool observation with the given replica count
     pool = PoolObservation(
-        name="p", replicas=replicas, queue_depth=0.0, work_in_flight=0.0, utilization=0.0
+        name="p",
+        replicas=replicas,
+        queue_depth=0.0,
+        work_in_flight=0.0,
+        utilization=0.0,
+        stale_s=stale_s,
     )
     return Observation(t_s=t_s, arrival_rate=0.0, pools={"p": pool})
 
@@ -87,3 +92,20 @@ def test_cold_start_tick_skips_apply():
     proposed = controller.tick()
     assert proposed.targets["p"] == 5
     assert controller._actuator.applied is None
+
+
+def test_warmup_tick_skips_apply():
+    """A warmup tick returns the raw proposal and applies nothing even when pools are ready."""
+    controller = _controller(max_step=1)
+    proposed = controller.tick(act=False)
+    assert proposed.targets["p"] == 5
+    assert controller._actuator.applied is None
+
+
+def test_stale_pool_holds_its_replicas():
+    """A pool whose gauges are older than the bound is left where it is rather than resized."""
+    controller = _controller(max_step=1, max_stale_s=36.0)
+    fresh = controller.reconcile(_obs(2, stale_s=0.0), Action(targets={"p": 5}))
+    stale = controller.reconcile(_obs(2, stale_s=48.0), Action(targets={"p": 5}))
+    assert fresh.targets["p"] == 3
+    assert stale.targets["p"] == 2

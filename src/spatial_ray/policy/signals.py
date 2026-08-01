@@ -63,6 +63,24 @@ class Backlog:
 
 
 @dataclass(frozen=True)
+class TotalBacklog:
+    """A running-plus-queued signal sizing a pool the way Ray's own autoscaler sizes one."""
+
+    target_ongoing_requests: float  # requests one replica is provisioned to hold at once
+
+    def demand(self, pool: PoolObservation) -> float:
+        """Divide the pool's running and router-queued requests by the per-replica target.
+
+        Args:
+            pool: The pool whose replica-side and router-side request counts are read.
+
+        Returns:
+            The replicas that hold every replica at the target ongoing requests.
+        """
+        return (pool.queue_depth + pool.queued_depth) / self.target_ongoing_requests
+
+
+@dataclass(frozen=True)
 class AdaptiveBacklog:
     """A byte-backlog signal sizing a pool from its live mean request size and batch concurrency."""
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from perf.cloud.controller import build_policy, pool_bounds
 from spatial_ray.control.bounds import PoolBounds
-from spatial_ray.policy.signals import AdaptiveBacklog, Backlog, MaxOf, Utilization
+from spatial_ray.policy.signals import Backlog, MaxOf, TotalBacklog, Utilization
 from spatial_ray.serve.application import Application
 from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec
 
@@ -24,17 +24,21 @@ def test_pool_bounds():
 
 
 def test_build_policy_signals():
-    """Decode sizes on its request cap, transform reads util, inference maxes util and queue."""
+    """Decode reads total backlog, transform reads util, inference maxes util and queue."""
     inference = InferenceSpec(model_factory=lambda: None, max_ongoing_requests=16)
     application = Application(DISAGGREGATED, inference, import_path="pkg.mod:app")
     policy = build_policy(
-        {"transform_util_target": 0.7, "inference_util_target": 0.6},
+        {
+            "transform_util_target": 0.7,
+            "inference_util_target": 0.6,
+            "decode_target_ongoing_requests": 8.0,
+        },
         application,
     )
     decode, transform, inference_signal = (
         policy.inner.signals[name] for name in ("decode", "transform", "inference")
     )
-    assert isinstance(decode, AdaptiveBacklog) and decode.max_ongoing_requests == 32
+    assert isinstance(decode, TotalBacklog) and decode.target_ongoing_requests == 8.0
     assert isinstance(transform, Utilization) and transform.target == 0.7
     assert isinstance(inference_signal, MaxOf)
     queue_signal = inference_signal.signals[1]

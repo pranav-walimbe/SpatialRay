@@ -57,8 +57,7 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         roles = node_roles()
         samples: list[Snapshot] = []
         wall_s = asyncio.run(_run_load(handle, trace, endpoints, samples))
-        final = scrape(endpoints)
-        latency = deployment_latency(final)
+        latency = deployment_latency(list(scrape(endpoints).texts))
     finally:
         stop_controller()
         serve.shutdown()

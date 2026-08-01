@@ -88,7 +88,7 @@ def build_graph(
     pools = [
         serve.deployment(StagePool)
         .options(**deployment_options(spec))
-        .bind(spec.stages, spec.work_unit)
+        .bind(spec.stages, spec.work_unit, spec.max_ongoing_requests)
         for spec in grouping
     ]
     inference_pool = (

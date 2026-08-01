@@ -38,6 +38,14 @@ def test_ewma():
     assert ewma.update(0.0) == 0.25
 
 
+def test_ewma_holds_across_a_missed_sample():
+    """A missed sample holds the average rather than decaying it toward an idle reading."""
+    ewma = _Ewma(alpha=0.5)
+    assert ewma.update(1.0) == 1.0
+    assert ewma.update(None) == 1.0
+    assert ewma.update(None) == 1.0
+
+
 def test_build_observation_util():
     """Each pool reads mean util over its nodes as a fraction."""
     ewmas = {"transform": _Ewma(alpha=1.0), "inference": _Ewma(alpha=1.0)}
@@ -85,6 +93,49 @@ def test_source_smooths():
     second = source.observe().pools["transform"].utilization
     assert first == 1.0
     assert second == 1.0
+
+
+def test_partial_first_scrape_is_infinitely_stale():
+    """With no whole scrape yet there is no last good reading to scale on."""
+    partial = MetricsView(
+        node_cpu={}, node_gpu={}, work={}, queue={}, roles={"t1": "decode"}, complete=False
+    )
+    source = RayObservationSource(
+        read_metrics=lambda: partial,
+        read_replicas=lambda: {"decode": 3},
+        util_kinds={"decode": None},
+    )
+    pool = source.observe().pools["decode"]
+    assert pool.queue_depth == 0.0
+    assert pool.stale_s == float("inf")
+
+
+def test_partial_scrape_holds_last_good():
+    """An unanswered endpoint carries the last good gauges forward instead of reading zero load."""
+    whole = MetricsView(
+        node_cpu={"t1": 100.0},
+        node_gpu={},
+        work={},
+        queue={"decode": 30.0},
+        roles={"t1": "decode"},
+        queued={"decode": 50.0},
+    )
+    partial = MetricsView(
+        node_cpu={}, node_gpu={}, work={}, queue={}, roles={"t1": "decode"}, complete=False
+    )
+    views = iter([whole, partial, partial])
+    source = RayObservationSource(
+        read_metrics=lambda: next(views),
+        read_replicas=lambda: {"decode": 1},
+        util_kinds={"decode": CPU},
+        ewma_alpha=0.5,
+    )
+    first = source.observe().pools["decode"]
+    assert (first.queue_depth, first.queued_depth, first.stale_s) == (30.0, 50.0, 0.0)
+    held = source.observe().pools["decode"]
+    assert (held.queue_depth, held.queued_depth) == (30.0, 50.0)
+    assert held.utilization == 1.0
+    assert source.observe().pools["decode"].stale_s > held.stale_s
 
 
 def test_source_ramps():

@@ -12,8 +12,12 @@ from perf.cloud.app import from_config
 from perf.cloud.utils import load_config
 from spatial_ray.control.actor import launch_detached, stop_detached
 from spatial_ray.control.bounds import PoolBounds
-from spatial_ray.control.controller import DEFAULT_TICK_S
-from spatial_ray.policy.dynamic import disaggregated_dynamic_policy, inference_queue_setpoint
+from spatial_ray.control.controller import DEFAULT_TICK_S, DEFAULT_WARMUP_S
+from spatial_ray.policy.dynamic import (
+    DEFAULT_TARGET_ONGOING_REQUESTS,
+    disaggregated_dynamic_policy,
+    inference_queue_setpoint,
+)
 from spatial_ray.policy.interfaces import Policy
 from spatial_ray.policy.types import Action, Observation
 from spatial_ray.serve.application import Application
@@ -53,7 +57,11 @@ class _LoggingPolicy:
         parts = []
         for name, pool in observation.pools.items():
             want = action.targets.get(name)
-            parts.append(f"{name}(util={pool.utilization:.2f} rep={pool.replicas} want={want})")
+            parts.append(
+                f"{name}(util={pool.utilization:.2f} run={pool.queue_depth:.0f} "
+                f"q={pool.queued_depth:.0f} rep={pool.replicas} want={want} "
+                f"stale={pool.stale_s:.0f}s)"
+            )
         print("[controller] " + " ".join(parts))
         return action
 
@@ -63,14 +71,15 @@ def build_policy(controller_cfg: Mapping[str, Any], application: Application) ->
 
     Args:
         controller_cfg: The controller section of the cloud config.
-        application: The deployed application whose pool specs set the decode and queue setpoints.
+        application: The deployed application whose inference spec sets the queue setpoint.
 
     Returns:
         A logging-wrapped dynamic policy pairing each pool with its own bottleneck signal.
     """
-    decode = next(spec for spec in application.grouping if spec.name == "decode")
     policy = disaggregated_dynamic_policy(
-        decode_max_ongoing_requests=decode.max_ongoing_requests,
+        decode_target_ongoing_requests=controller_cfg.get(
+            "decode_target_ongoing_requests", DEFAULT_TARGET_ONGOING_REQUESTS
+        ),
         inference_queue_per_replica=inference_queue_setpoint(
             application.inference.max_ongoing_requests
         ),
@@ -98,6 +107,7 @@ def start_controller(model_name: str, hardware: str):
         application.serve_config,
         app_name=application.app_name,
         tick_s=config["controller"].get("tick_s", DEFAULT_TICK_S),
+        warmup_s=config["controller"].get("warmup_s", DEFAULT_WARMUP_S),
     )
 
 

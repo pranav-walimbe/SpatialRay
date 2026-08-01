@@ -11,7 +11,7 @@ from typing import Any
 import ray
 
 from spatial_ray.control.bounds import PoolBounds
-from spatial_ray.control.controller import DEFAULT_TICK_S, Controller
+from spatial_ray.control.controller import DEFAULT_TICK_S, DEFAULT_WARMUP_S, Controller
 from spatial_ray.control.ray_actuator import RayActuator
 from spatial_ray.control.ray_source import ray_observation_source
 from spatial_ray.policy.interfaces import Policy
@@ -32,6 +32,7 @@ class ControllerHost:
         app_name: str = "spatialray",
         util_kinds: Mapping[str, str | None] | None = None,
         tick_s: float = DEFAULT_TICK_S,
+        warmup_s: float = DEFAULT_WARMUP_S,
     ) -> None:
         # build the loop cluster-side so no live source, actuator, or lock is ever pickled to here
         source = (
@@ -40,7 +41,9 @@ class ControllerHost:
             else ray_observation_source(util_kinds, app_name=app_name)
         )
         actuator = RayActuator(actuator_config)
-        self._controller = Controller(source, policy, actuator, bounds, tick_s=tick_s)
+        self._controller = Controller(
+            source, policy, actuator, bounds, tick_s=tick_s, warmup_s=warmup_s
+        )
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -68,6 +71,7 @@ def launch_detached(
     app_name: str = "spatialray",
     util_kinds: Mapping[str, str | None] | None = None,
     tick_s: float = DEFAULT_TICK_S,
+    warmup_s: float = DEFAULT_WARMUP_S,
     actor_name: str = DEFAULT_ACTOR_NAME,
 ):
     """Spawn the controller host as a named detached actor and start its loop ticking.
@@ -79,6 +83,7 @@ def launch_detached(
         app_name: Name of the running Serve application to observe and rescale.
         util_kinds: Utilization source per pool, defaulting to the disaggregated grouping.
         tick_s: Control loop period in seconds.
+        warmup_s: Startup grace period before the first scaling action, letting replicas warm up.
         actor_name: Name the detached actor is registered under.
 
     Returns:
@@ -88,7 +93,13 @@ def launch_detached(
         name=actor_name, lifetime="detached", get_if_exists=True
     )
     actor = host.remote(
-        policy, bounds, actuator_config, app_name=app_name, util_kinds=util_kinds, tick_s=tick_s
+        policy,
+        bounds,
+        actuator_config,
+        app_name=app_name,
+        util_kinds=util_kinds,
+        tick_s=tick_s,
+        warmup_s=warmup_s,
     )
     actor.start.remote()
     return actor

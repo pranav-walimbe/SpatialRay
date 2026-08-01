@@ -5,7 +5,7 @@ The Ray observation source reducing scraped Prometheus gauges and Serve status i
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 
 from ray import serve
 
@@ -15,6 +15,9 @@ from spatial_ray.policy.types import Observation, PoolObservation
 DEFAULT_EWMA_ALPHA = 0.3
 CPU = "cpu"
 GPU = "gpu"
+
+# gauge fields a pool carries forward from its last whole scrape
+_GAUGE_FIELDS = ("queue_depth", "queued_depth", "work_in_flight", "mean_decoded_bytes")
 
 # Utilization source per disaggregated pool
 DISAGGREGATED_UTIL_KINDS: dict[str, str | None] = {
@@ -31,15 +34,17 @@ class _Ewma:
         self._alpha = alpha
         self._value: float | None = None
 
-    def update(self, sample: float) -> float:
+    def update(self, sample: float | None) -> float:
         """Fold a new sample into the running average and return the smoothed value.
 
         Args:
-            sample: The latest raw utilization fraction.
+            sample: The latest raw utilization fraction, or None when the scrape missed it.
 
         Returns:
-            The updated EWMA, seeded to the first sample so it does not ramp from zero.
+            The updated EWMA, held unchanged across a missed sample.
         """
+        if sample is None:
+            return self._value if self._value is not None else 0.0
         if self._value is None:
             self._value = sample
         else:
@@ -47,10 +52,12 @@ class _Ewma:
         return self._value
 
 
-def _pool_utilization(pool: str, kind: str | None, view: MetricsView, replicas: int) -> float:
+def _pool_utilization(
+    pool: str, kind: str | None, view: MetricsView, replicas: int
+) -> float | None:
     # the pool's summed node utilization divided per replica and normalized to a 0-to-1 fraction
     if kind is None or replicas <= 0:
-        return 0.0
+        return None
     source = view.node_gpu if kind == GPU else view.node_cpu
     ips = [ip for ip, role in view.roles.items() if role == pool]
     return sum(source.get(ip, 0.0) for ip in ips) / replicas / 100.0
@@ -63,8 +70,13 @@ def build_observation(
     util_kinds: Mapping[str, str | None],
     ewmas: Mapping[str, _Ewma],
     arrival_rate: float = 0.0,
+    last_good: MutableMapping[str, dict[str, float]] | None = None,
+    last_whole_t: float | None = None,
 ) -> Observation:
     """Reduce one metrics scrape and replica census into a per-pool observation.
+
+    A partial scrape leaves a pool's gauges absent rather than zero, so the last good reading is
+    carried forward and stamped with its age instead of being read as an idle pool.
 
     Args:
         t_s: Monotonic timestamp of the scrape in seconds.
@@ -73,21 +85,35 @@ def build_observation(
         util_kinds: Utilization source per pool, cpu or gpu or None to skip.
         ewmas: Per-pool EWMA smoother for the pools that carry a utilization signal.
         arrival_rate: System ingress request rate, left at zero until the predictive policy uses it.
+        last_good: Per-pool gauge readings from the last whole scrape, updated in place.
+        last_whole_t: Timestamp of the last whole scrape, or None if none has landed yet.
 
     Returns:
-        An observation carrying live replicas, queue depth, work in flight, and utilization.
+        An observation carrying live replicas, backlog, work in flight, utilization, and staleness.
     """
+    held = {} if last_good is None else last_good
+    if view.complete:
+        stale_s = 0.0
+    else:
+        # before any whole scrape lands there is no last good reading to fall back on
+        stale_s = float("inf") if last_whole_t is None else t_s - last_whole_t
     pools: dict[str, PoolObservation] = {}
     for name, count in replicas.items():
         raw = _pool_utilization(name, util_kinds.get(name), view, count)
-        smoothed = ewmas[name].update(raw) if name in ewmas else raw
+        if view.complete:
+            gauges = {
+                "queue_depth": view.queue.get(name, 0.0),
+                "queued_depth": view.queued.get(name, 0.0),
+                "work_in_flight": view.work.get(name, 0.0),
+                "mean_decoded_bytes": view.mean_bytes.get(name, 0.0),
+            }
+            held[name] = gauges
+        else:
+            gauges = held.get(name, dict.fromkeys(_GAUGE_FIELDS, 0.0))
+            raw = None
+        smoothed = ewmas[name].update(raw) if name in ewmas else (raw or 0.0)
         pools[name] = PoolObservation(
-            name=name,
-            replicas=count,
-            queue_depth=view.queue.get(name, 0.0),
-            work_in_flight=view.work.get(name, 0.0),
-            utilization=smoothed,
-            mean_decoded_bytes=view.mean_bytes.get(name, 0.0),
+            name=name, replicas=count, utilization=smoothed, stale_s=stale_s, **gauges
         )
     return Observation(t_s=t_s, arrival_rate=arrival_rate, pools=pools)
 
@@ -129,6 +155,9 @@ class RayObservationSource:
         self._ewmas = {
             name: _Ewma(ewma_alpha) for name, kind in util_kinds.items() if kind is not None
         }
+        # gauges from the last whole scrape carried forward across a partial one
+        self._last_good: dict[str, dict[str, float]] = {}
+        self._last_whole_t: float | None = None
 
     def observe(self) -> Observation:
         """Scrape the current metrics and replica census into one observation.
@@ -136,13 +165,20 @@ class RayObservationSource:
         Returns:
             An observation snapshot for the policy to decide on.
         """
-        return build_observation(
-            time.monotonic(),
-            self._read_metrics(),
+        t_s = time.monotonic()
+        view = self._read_metrics()
+        observation = build_observation(
+            t_s,
+            view,
             self._read_replicas(),
             self._util_kinds,
             self._ewmas,
+            last_good=self._last_good,
+            last_whole_t=self._last_whole_t,
         )
+        if view.complete:
+            self._last_whole_t = t_s
+        return observation
 
 
 def ray_observation_source(

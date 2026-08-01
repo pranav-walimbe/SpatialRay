@@ -4,6 +4,7 @@ The Serve deployment classes for the disaggregated pipeline pools and the compos
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -93,11 +94,20 @@ class _WorkGauge:
 
 
 class StagePool:
-    def __init__(self, stages: Sequence[Stage], work_unit: str | None = None) -> None:
+    def __init__(
+        self,
+        stages: Sequence[Stage],
+        work_unit: str | None = None,
+        max_concurrency: int | None = None,
+    ) -> None:
         self._stages = tuple(stages)
         # decode is the one stage needing shared IO concurrency
         self._io_pool = (
             ThreadPoolExecutor(max_workers=_DECODE_NUM_WORKERS) if decode in self._stages else None
+        )
+        # a pool sized by the admission cap keeps Serve from throttling us to its num_cpus width
+        self._stage_pool = (
+            ThreadPoolExecutor(max_workers=max_concurrency) if max_concurrency is not None else None
         )
         # work_unit is set only on the Serve path, the plain multiprocess harness leaves it None
         self._work = (
@@ -106,8 +116,8 @@ class StagePool:
         # the byte-work pool also tracks its mean request size so decode can size on live bytes
         self._mean_bytes = _MeanBytesGauge() if work_unit == "bytes" else None
 
-    def run(self, payload: RasterPayload) -> RasterPayload:
-        """Run this pool's stages in order on the payload.
+    async def run(self, payload: RasterPayload) -> RasterPayload:
+        """Run this pool's stages in order on the payload, off the replica's event loop.
 
         Args:
             payload: Payload entering the pool.
@@ -115,17 +125,23 @@ class StagePool:
         Returns:
             The payload after all of the pool's stages have run.
         """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._stage_pool, self._run_stages, payload)
+
+    def shutdown(self) -> None:
+        """Release the shared IO and stage thread pools this pool created."""
+        for pool in (self._io_pool, self._stage_pool):
+            if pool is not None:
+                pool.shutdown()
+
+    def _run_stages(self, payload: RasterPayload) -> RasterPayload:
+        # the blocking stage chain with the work gauge held up while the payload is in flight
         if self._mean_bytes is not None:
             self._mean_bytes.record(payload.request)
         with self._work.track(payload) if self._work is not None else nullcontext():
             for stage in self._stages:
                 payload = stage(payload, self._io_pool) if stage is decode else stage(payload)
         return payload
-
-    def shutdown(self) -> None:
-        """Release this pool's shared IO thread pool, if it created one."""
-        if self._io_pool is not None:
-            self._io_pool.shutdown()
 
 
 class InferencePool:
