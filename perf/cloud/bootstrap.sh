@@ -73,7 +73,6 @@ export TMPDIR=/data/scratch
 export AWS_DEFAULT_REGION="$REGION"
 export SPATIALRAY_MODEL="$MODEL"
 export SPATIALRAY_HARDWARE="$HARDWARE"
-export RAY_SERVE_QUEUE_LENGTH_RESPONSE_DEADLINE_S=1.0
 
 # this node's private ip via IMDSv2
 TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")

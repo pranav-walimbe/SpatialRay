@@ -22,10 +22,11 @@ class PoolSpec:
     name: str  # Serve deployment name for the pool
     stages: tuple[Stage, ...]  # phase-1 stage functions the pool runs in order
     num_replicas: int = DEFAULT_NUM_REPLICAS  # static replica count when not autoscaling
-    max_ongoing_requests: int | None = None  # per-replica request cap, None keeps Serve's default
+    max_ongoing_requests: int | None = None  # per-replica request cap that None leaves to Serve
+    max_concurrency: int | None = None  # stage chains one replica runs at once
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
-    autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling, overrides num_replicas
-    work_unit: str | None = None  # work-in-flight gauge unit, "bytes" or "tiles", None disables it
+    autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling overriding num_replicas
+    work_unit: str | None = None  # work-in-flight gauge unit of bytes or tiles that None disables
 
 
 @dataclass(frozen=True)
@@ -33,14 +34,14 @@ class InferenceSpec:
     model_factory: Callable[[], object]  # zero-arg factory building the model on each replica
     name: str = "inference"  # Serve deployment name for the inference pool
     num_replicas: int = DEFAULT_NUM_REPLICAS  # static replica count when not autoscaling
-    max_ongoing_requests: int | None = None  # per-replica request cap, None keeps Serve's default
+    max_ongoing_requests: int | None = None  # per-replica request cap that None leaves to Serve
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
-    autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling, overrides num_replicas
-    work_unit: str | None = "tiles"  # work-in-flight gauge unit, None disables it
+    autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling overriding num_replicas
+    work_unit: str | None = "tiles"  # work-in-flight gauge unit that None disables
 
 
 DISAGGREGATED: tuple[PoolSpec, ...] = (
-    PoolSpec(name="decode", stages=(decode,), max_ongoing_requests=32, work_unit="bytes"),
+    PoolSpec(name="decode", stages=(decode,), work_unit="bytes"),
     PoolSpec(name="transform", stages=(reproject_stage, normalize, tile), work_unit="tiles"),
 )
 
@@ -88,7 +89,7 @@ def build_graph(
     pools = [
         serve.deployment(StagePool)
         .options(**deployment_options(spec))
-        .bind(spec.stages, spec.work_unit, spec.max_ongoing_requests)
+        .bind(spec.stages, spec.work_unit, spec.max_concurrency)
         for spec in grouping
     ]
     inference_pool = (

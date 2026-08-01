@@ -17,7 +17,6 @@ APP_NAME = "spatialray"
 _IMPORT_PATH = "perf.cloud.app:app"
 _HARDWARE_ENV = "SPATIALRAY_HARDWARE"
 _MODEL_ENV = "SPATIALRAY_MODEL"
-_INGRESS_NODE = "transform"  # cpu node the ingress replicas pin to
 
 
 def from_config(model_name: str = DEFAULT_MODEL, hardware: str = "cpu") -> Application:
@@ -30,7 +29,8 @@ def from_config(model_name: str = DEFAULT_MODEL, hardware: str = "cpu") -> Appli
     Returns:
         An Application binding the sized grouping and inference spec.
     """
-    pools_cfg = load_config()["pools"]
+    config = load_config()
+    pools_cfg = config["pools"]
     grouping = tuple(_sized_pool(spec, pools_cfg[spec.name]) for spec in DISAGGREGATED)
     inference = _inference_spec(pools_cfg, model_name, hardware)
     return Application(
@@ -38,19 +38,29 @@ def from_config(model_name: str = DEFAULT_MODEL, hardware: str = "cpu") -> Appli
         inference,
         import_path=_IMPORT_PATH,
         app_name=APP_NAME,
-        ingress_options=_ingress_options(),
+        ingress_options=_ingress_options(config["ingress"]),
     )
 
 
-def _ingress_options():
-    # pin the ingress replicas to a cpu node so they stay off the gpu inference box
-    return {"ray_actor_options": {"resources": {node_resource(_INGRESS_NODE): 0.01}}}
+def _ingress_options(ingress_cfg):
+    # replica count and admission from config pinned to the cpu node the ingress shares
+    return {
+        "num_replicas": ingress_cfg["replicas"],
+        "max_ongoing_requests": ingress_cfg["max_ongoing_requests"],
+        "ray_actor_options": {"resources": {node_resource(ingress_cfg["node"]): 0.01}},
+    }
 
 
 def _sized_pool(spec, pool_cfg):
-    # replica count from config and a fractional node resource pinning the pool to its stage node
+    # replica count and widths from config with a fractional node resource pinning it to its node
     options = {"num_cpus": pool_cfg["num_cpus"], "resources": {node_resource(spec.name): 0.01}}
-    return dataclasses.replace(spec, num_replicas=pool_cfg["replicas"], ray_actor_options=options)
+    return dataclasses.replace(
+        spec,
+        num_replicas=pool_cfg["replicas"],
+        max_ongoing_requests=pool_cfg["max_ongoing_requests"],
+        max_concurrency=pool_cfg["max_concurrency"],
+        ray_actor_options=options,
+    )
 
 
 def _inference_spec(pools_cfg, model_name, hardware):

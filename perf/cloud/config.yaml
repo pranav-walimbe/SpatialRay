@@ -17,7 +17,7 @@ repo_branch: main
 cpu_ami_ssm: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 gpu_ami_ssm: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id
 
-# disaggregated Serve cluster with a fixed per-stage node budget read by launcher and harness
+# disaggregated Serve cluster with a per-stage node budget and matched admission and execution width
 pools:
   decode:
     instance_type: c6i.xlarge
@@ -27,6 +27,8 @@ pools:
     num_cpus: 1
     min_replicas: 1
     max_replicas: 8
+    max_ongoing_requests: 12
+    max_concurrency: 12
   transform:
     instance_type: c6i.2xlarge
     ami_ssm: cpu_ami_ssm
@@ -35,6 +37,8 @@ pools:
     num_cpus: 2
     min_replicas: 1
     max_replicas: 2
+    max_ongoing_requests: 8
+    max_concurrency: 8
   inference:
     nodes: 2
     replicas: 1
@@ -49,6 +53,11 @@ pools:
       ami_ssm: gpu_ami_ssm
       num_cpus: 1
       num_gpus: 1
+
+ingress:
+  node: transform
+  replicas: 2
+  max_ongoing_requests: 16
 
 # dynamic-policy inputs
 controller:
