@@ -145,7 +145,12 @@ class StagePool:
 
 
 class InferencePool:
-    def __init__(self, model_factory, work_unit: str | None = None) -> None:
+    def __init__(
+        self,
+        model_factory,
+        work_unit: str | None = None,
+        max_concurrency: int | None = None,
+    ) -> None:
         self._model = model_factory()
         # inference weighs work by the tiles already carried on the incoming batch
         self._work = (
@@ -153,9 +158,13 @@ class InferencePool:
             if work_unit is not None
             else None
         )
+        # a pool sized by the admission cap keeps Serve from throttling us to its num_cpus width
+        self._infer_pool = (
+            ThreadPoolExecutor(max_workers=max_concurrency) if max_concurrency is not None else None
+        )
 
-    def infer(self, payload: RasterPayload) -> Predictions:
-        """Run the model forward pass over a payload's tiles.
+    async def infer(self, payload: RasterPayload) -> Predictions:
+        """Run the model forward pass over a payload's tiles, off the replica's event loop.
 
         Args:
             payload: Payload with tiles set by the preprocessing pools.
@@ -163,6 +172,16 @@ class InferencePool:
         Returns:
             Predictions carrying the model output for the payload.
         """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._infer_pool, self._run_model, payload)
+
+    def shutdown(self) -> None:
+        """Release the forward-pass thread pool this pool created."""
+        if self._infer_pool is not None:
+            self._infer_pool.shutdown()
+
+    def _run_model(self, payload: RasterPayload) -> Predictions:
+        # the blocking forward pass with the work gauge held up while the tiles are in flight
         with self._work.track(payload) if self._work is not None else nullcontext():
             array = self._model(payload.tiles)
         return Predictions(request=payload.request, array=array)

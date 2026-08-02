@@ -57,7 +57,7 @@ def parse_snapshot(scraped: Scrape, t_s: float) -> Snapshot:
     Returns:
         A Snapshot holding per-node hardware gauges and per-deployment work and backlog.
     """
-    reduced = reduce_families(list(scraped.texts), _SNAPSHOT_SPECS)
+    reduced, _ = reduce_families(list(scraped.texts), _SNAPSHOT_SPECS)
     return Snapshot(
         t_s=t_s,
         node_cpu=reduced[NODE_CPU],

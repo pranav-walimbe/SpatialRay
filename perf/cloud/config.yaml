@@ -23,7 +23,7 @@ pools:
     instance_type: c6i.xlarge
     ami_ssm: cpu_ami_ssm
     nodes: 2
-    replicas: 3
+    replicas: 6
     num_cpus: 1
     min_replicas: 1
     max_replicas: 8
@@ -41,10 +41,11 @@ pools:
     max_concurrency: 8
   inference:
     nodes: 2
-    replicas: 1
+    replicas: 2
     min_replicas: 1
     max_replicas: 2
     max_ongoing_requests: 8
+    max_concurrency: 8
     cpu:
       instance_type: m7i.xlarge
       ami_ssm: cpu_ami_ssm
@@ -58,13 +59,13 @@ pools:
 ingress:
   node: transform
   replicas: 2
-  max_ongoing_requests: 64
+  max_ongoing_requests: 24
 
 # dynamic-policy inputs
 controller:
-  tick_s: 12.0
+  tick_s: 4.0
   warmup_s: 60.0
   decode_target_ongoing_requests: 8.0
   inference_target_ongoing_requests: 4.0
   transform_util_target: 0.7
-  inference_util_target: 0.7
+  inference_util_target: 0.45

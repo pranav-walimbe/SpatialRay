@@ -74,6 +74,7 @@ def build_observation(
     arrival_rate: float = 0.0,
     last_good: MutableMapping[str, dict[str, float]] | None = None,
     last_whole_t: float | None = None,
+    peak_handles: MutableMapping[str, int] | None = None,
 ) -> Observation:
     """Reduce one metrics scrape and replica census into a per-pool observation.
 
@@ -89,11 +90,13 @@ def build_observation(
         arrival_rate: System ingress request rate, left at zero until the predictive policy uses it.
         last_good: Per-pool gauge readings from the last whole scrape, updated in place.
         last_whole_t: Timestamp of the last whole scrape, or None if none has landed yet.
+        peak_handles: Per-pool high-water mark of routers seen reporting, updated in place.
 
     Returns:
         An observation carrying live replicas, backlog, work in flight, utilization, and staleness.
     """
     held = {} if last_good is None else last_good
+    peaks = {} if peak_handles is None else peak_handles
     if view.complete:
         stale_s = 0.0
     else:
@@ -103,9 +106,12 @@ def build_observation(
     for name, count in replicas.items():
         raw = _pool_utilization(name, util_kinds.get(name), view, count)
         if view.complete:
+            per_replica = view.queue.get(name)
+            peaks[name] = max(peaks.get(name, 0), view.queued_handles.get(name, 1))
+            per_router = view.queued.get(name)
             gauges = {
-                "queue_depth": view.queue.get(name),
-                "queued_depth": view.queued.get(name),
+                "queue_depth": None if per_replica is None else per_replica * count,
+                "queued_depth": None if per_router is None else per_router * peaks[name],
                 "work_in_flight": view.work.get(name),
                 "mean_decoded_bytes": view.mean_bytes.get(name),
             }
@@ -160,6 +166,7 @@ class RayObservationSource:
         # gauges from the last whole scrape carried forward across a partial one
         self._last_good: dict[str, dict[str, float]] = {}
         self._last_whole_t: float | None = None
+        self._peak_handles: dict[str, int] = {}
 
     def observe(self) -> Observation:
         """Scrape the current metrics and replica census into one observation.
@@ -177,6 +184,7 @@ class RayObservationSource:
             self._ewmas,
             last_good=self._last_good,
             last_whole_t=self._last_whole_t,
+            peak_handles=self._peak_handles,
         )
         if view.complete:
             self._last_whole_t = t_s

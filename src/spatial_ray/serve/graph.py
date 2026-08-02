@@ -35,6 +35,7 @@ class InferenceSpec:
     name: str = "inference"  # Serve deployment name for the inference pool
     num_replicas: int = DEFAULT_NUM_REPLICAS  # static replica count when not autoscaling
     max_ongoing_requests: int | None = None  # per-replica request cap that None leaves to Serve
+    max_concurrency: int | None = None  # forward passes one replica runs at once
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling overriding num_replicas
     work_unit: str | None = "tiles"  # work-in-flight gauge unit that None disables
@@ -95,7 +96,7 @@ def build_graph(
     inference_pool = (
         serve.deployment(InferencePool)
         .options(**deployment_options(inference))
-        .bind(inference.model_factory, inference.work_unit)
+        .bind(inference.model_factory, inference.work_unit, inference.max_concurrency)
     )
     options = {"num_replicas": DEFAULT_NUM_REPLICAS, **dict(ingress_options or {})}
     ingress = serve.deployment(Ingress).options(name="ingress", **options)

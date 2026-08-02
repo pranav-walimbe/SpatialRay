@@ -48,17 +48,26 @@ def _scrape(*texts: str) -> Scrape:
 
 
 def test_parse_metrics_view():
-    """Per-node CPU is kept, GPUs on a node sum, a deployment sums across nodes and handles."""
+    """Per-node CPU is kept, GPUs on a node sum, and the replica and router queues mean."""
     roles = {"t1": "transform", "t2": "transform", "g1": "inference"}
     view = parse_metrics_view(_scrape(_node_a(), _node_b()), roles)
     assert view.node_cpu == {"t1": 40.0, "t2": 60.0}
     assert view.node_gpu == {"g1": 80.0}
     assert view.work == {"decode": 1024.0}
     assert view.mean_bytes == {"decode": 512.0}
-    assert view.queue == {"inference": 7.0}
-    assert view.queued == {"decode": 20.0}
+    assert view.queue == {"inference": 3.5}
+    assert view.queued == {"decode": 10.0}
+    assert view.queued_handles == {"decode": 2}
     assert view.roles == roles
     assert view.complete
+
+
+def test_queue_gauges_mean_over_the_sources_that_reported():
+    """Both queue gauges average their reporters so a partial export is not an undercount."""
+    both = parse_metrics_view(_scrape(_node_a(), _node_b()), {})
+    one = parse_metrics_view(_scrape(_node_a()), {})
+    assert (both.queue, both.queued) == ({"inference": 3.5}, {"decode": 10.0})
+    assert (one.queue, one.queued) == ({"inference": 4.0}, {})
 
 
 def test_parse_metrics_view_partial():

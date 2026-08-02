@@ -75,6 +75,7 @@ def _inference_spec(pools_cfg, model_name, hardware):
         model_factory=_model_factory(model_name),
         num_replicas=inference_cfg["replicas"],
         max_ongoing_requests=inference_cfg["max_ongoing_requests"],
+        max_concurrency=inference_cfg["max_concurrency"],
         ray_actor_options=options,
     )
 

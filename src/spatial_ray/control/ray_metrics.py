@@ -30,8 +30,8 @@ _VIEW_SPECS = {
     NODE_CPU: ("ip", "last"),
     NODE_GPU: ("ip", "sum"),
     WORK: ("deployment", "sum"),
-    QUEUE: ("deployment", "sum"),
-    QUEUED: ("deployment", "sum"),
+    QUEUE: ("deployment", "mean"),
+    QUEUED: ("deployment", "mean"),
     MEAN_BYTES: ("deployment", "last"),
 }
 
@@ -56,14 +56,17 @@ class MetricsView:
     node_cpu: dict[str, float]  # node ip to CPU utilization percent
     node_gpu: dict[str, float]  # node ip to summed GPU utilization percent
     work: dict[str, float]  # deployment to work units in flight from our custom gauge
-    queue: dict[str, float]  # deployment to queries being processed across its replicas
+    queue: dict[str, float]  # deployment to queries being processed per reporting replica
     roles: dict[str, str]  # node ip to the pool that node hosts
     mean_bytes: dict[str, float] = field(
         default_factory=dict
     )  # deployment to its EWMA decoded bytes per request
     queued: dict[str, float] = field(
         default_factory=dict
-    )  # deployment to queries waiting at the routers for a replica
+    )  # deployment to queries waiting per reporting router for a replica
+    queued_handles: dict[str, int] = field(
+        default_factory=dict
+    )  # deployment to the routers that reported a queued gauge
     complete: bool = True  # whether every endpoint answered so a missing gauge means zero load
 
 
@@ -137,20 +140,18 @@ def _fetch(url: str) -> str | None:
 
 def reduce_families(
     texts: list[str], specs: Mapping[str, tuple[str, str]]
-) -> dict[str, dict[str, float]]:
+) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, int]]]:
     """Reduce scrapes into each requested family's label-keyed gauge values.
-
-    A key no endpoint reported is left out of its family rather than defaulted to zero, so a
-    caller can tell an absent gauge from an idle one.
 
     Args:
         texts: Per-node Prometheus exposition documents scraped from the cluster.
-        specs: Family name to a (label, aggregation) pair.
+        specs: Family name to a (label, aggregation) pair of last, sum, or mean.
 
     Returns:
-        Family name to its label value to the reduced gauge.
+        Family name to its label value to the reduced gauge, and to the samples that key reduced.
     """
     reduced: dict[str, dict[str, float]] = {name: {} for name in specs}
+    reporters: dict[str, dict[str, int]] = {name: {} for name in specs}
     for text in texts:
         for family in text_string_to_metric_families(text):
             spec = specs.get(family.name)
@@ -158,15 +159,22 @@ def reduce_families(
                 continue
             label, aggregation = spec
             bucket = reduced[family.name]
+            counted = reporters[family.name]
             for sample in family.samples:
                 key = sample.labels.get(label)
                 if key is None:
                     continue
-                if aggregation == "sum" and key in bucket:
+                if aggregation in ("sum", "mean") and key in bucket:
                     bucket[key] += sample.value
                 else:
                     bucket[key] = sample.value
-    return reduced
+                counted[key] = counted.get(key, 0) + 1
+    for name, (_, aggregation) in specs.items():
+        if aggregation == "mean":
+            reduced[name] = {
+                key: total / reporters[name][key] for key, total in reduced[name].items()
+            }
+    return reduced, reporters
 
 
 def parse_metrics_view(
@@ -182,7 +190,7 @@ def parse_metrics_view(
     Returns:
         A MetricsView of the node and deployment gauges, flagged with whether the scrape was whole.
     """
-    reduced = reduce_families(list(scraped.texts), _VIEW_SPECS)
+    reduced, reporters = reduce_families(list(scraped.texts), _VIEW_SPECS)
     return MetricsView(
         node_cpu=reduced[NODE_CPU],
         node_gpu=reduced[NODE_GPU],
@@ -191,6 +199,7 @@ def parse_metrics_view(
         roles=dict(roles),
         mean_bytes=reduced[MEAN_BYTES],
         queued=reduced[QUEUED],
+        queued_handles=reporters[QUEUED],
         complete=scraped.complete if complete is None else complete,
     )
 

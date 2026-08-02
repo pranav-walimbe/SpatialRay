@@ -93,6 +93,39 @@ def test_unreported_gauge_reads_absent_not_zero():
     assert transform.queue_depth == 0.0
 
 
+def test_replica_queue_scales_to_the_census():
+    """The per-replica queue mean times the replica census estimates the pool's whole backlog."""
+    view = MetricsView(node_cpu={}, node_gpu={}, work={}, queue={"decode": 8.0}, roles={})
+    observation = build_observation(0.0, view, {"decode": 6}, {"decode": None}, {})
+    assert observation.pools["decode"].queue_depth == 48.0
+
+
+def _queued(per_router: float, handles: int) -> MetricsView:
+    # a scrape where only the given number of routers exported their queued gauge
+    return MetricsView(
+        node_cpu={},
+        node_gpu={},
+        work={},
+        queue={},
+        roles={},
+        queued={"decode": per_router},
+        queued_handles={"decode": handles},
+    )
+
+
+def test_router_queue_scales_to_the_peak_handle_count():
+    """A router dropping out keeps the queued estimate on the most handles ever seen reporting."""
+    peaks: dict[str, int] = {}
+    both = build_observation(
+        0.0, _queued(10.0, 2), {"decode": 1}, {"decode": None}, {}, peak_handles=peaks
+    )
+    assert both.pools["decode"].queued_depth == 20.0
+    one = build_observation(
+        1.0, _queued(10.0, 1), {"decode": 1}, {"decode": None}, {}, peak_handles=peaks
+    )
+    assert one.pools["decode"].queued_depth == 20.0
+
+
 def test_source_smooths():
     """The source keeps its EWMA state between ticks."""
     hot = MetricsView(
