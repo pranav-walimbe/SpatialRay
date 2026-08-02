@@ -4,11 +4,7 @@ Tests the dynamic policy sizes each pool from its own signal and skips unconfigu
 
 from __future__ import annotations
 
-from spatial_ray.policy.dynamic import (
-    DynamicPolicy,
-    disaggregated_dynamic_policy,
-    inference_queue_setpoint,
-)
+from spatial_ray.policy.dynamic import DynamicPolicy, disaggregated_dynamic_policy
 from spatial_ray.policy.signals import AdaptiveBacklog, Backlog, MaxOf, TotalBacklog, Utilization
 from spatial_ray.policy.types import Observation, PoolObservation
 
@@ -17,13 +13,13 @@ def _pool(
     name: str,
     *,
     replicas: int = 2,
-    queue_depth: float = 0.0,
-    work_in_flight: float = 0.0,
-    utilization: float = 0.0,
-    mean_decoded_bytes: float = 0.0,
-    queued_depth: float = 0.0,
+    queue_depth: float | None = 0.0,
+    work_in_flight: float | None = 0.0,
+    utilization: float | None = 0.0,
+    mean_decoded_bytes: float | None = 0.0,
+    queued_depth: float | None = 0.0,
 ) -> PoolObservation:
-    # one pool's signals with every field defaulted
+    # one pool's signals defaulting to a reported zero so a test opts into absence with None
     return PoolObservation(
         name=name,
         replicas=replicas,
@@ -35,10 +31,13 @@ def _pool(
     )
 
 
-def test_inference_queue_setpoint():
-    """Doubles the request cap and falls back to ten when it is unset."""
-    assert inference_queue_setpoint(16) == 32
-    assert inference_queue_setpoint(None) == 10
+def test_inference_backlog_can_exceed_its_replicas():
+    """Router-queued requests let inference ask for more replicas than it already runs."""
+    policy = disaggregated_dynamic_policy(
+        decode_target_ongoing_requests=8.0, inference_target_ongoing_requests=4.0
+    )
+    swamped = _pool("inference", replicas=1, queue_depth=5.0, queued_depth=30.0, utilization=0.24)
+    assert policy.signals["inference"].demand(swamped) == 8.75 > swamped.replicas
 
 
 def test_utilization_signal():
@@ -102,10 +101,45 @@ def test_total_backlog_exceeds_current_replicas():
     assert signal.demand(pool) == 8.0 > pool.replicas
 
 
+def test_signals_have_no_opinion_on_an_absent_gauge():
+    """Every signal returns None when a gauge it reads went unreported this scrape."""
+    assert Utilization(target=0.5).demand(_pool("t", utilization=None)) is None
+    assert (
+        Backlog(per_replica=4.0, metric="queue_depth").demand(_pool("d", queue_depth=None)) is None
+    )
+    assert TotalBacklog(target_ongoing_requests=8.0).demand(_pool("d", queue_depth=None)) is None
+    assert AdaptiveBacklog(max_ongoing_requests=4).demand(_pool("d", work_in_flight=None)) is None
+
+
+def test_max_of_ignores_absent_components():
+    """MaxOf sizes on the components that reported and goes silent only when none did."""
+    signal = MaxOf((Utilization(target=0.8), Backlog(per_replica=5.0, metric="queue_depth")))
+    partial = _pool("i", replicas=1, utilization=None, queue_depth=20.0)
+    assert signal.demand(partial) == 4.0
+    assert signal.demand(_pool("i", utilization=None, queue_depth=None)) is None
+
+
+def test_absent_gauge_holds_the_pool_instead_of_scaling_it_to_zero():
+    """An unreported decode gauge leaves the pool out of targets rather than demanding zero."""
+    policy = DynamicPolicy(signals={"decode": TotalBacklog(target_ongoing_requests=8.0)})
+    absent = Observation(
+        t_s=0.0,
+        arrival_rate=1.0,
+        pools={"decode": _pool("decode", replicas=3, queue_depth=None, queued_depth=None)},
+    )
+    assert policy.decide(absent).targets == {}
+    idle = Observation(
+        t_s=0.0,
+        arrival_rate=1.0,
+        pools={"decode": _pool("decode", replicas=3, queue_depth=0.0, queued_depth=0.0)},
+    )
+    assert policy.decide(idle).targets == {"decode": 0}
+
+
 def test_decide_skips_absent_pool():
     """A configured pool missing from the observation is left out."""
     policy = disaggregated_dynamic_policy(
-        decode_target_ongoing_requests=8.0, inference_queue_per_replica=4.0
+        decode_target_ongoing_requests=8.0, inference_target_ongoing_requests=4.0
     )
     observation = Observation(
         t_s=0.0,

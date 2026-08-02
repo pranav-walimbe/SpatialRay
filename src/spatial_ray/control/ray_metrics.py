@@ -140,6 +140,9 @@ def reduce_families(
 ) -> dict[str, dict[str, float]]:
     """Reduce scrapes into each requested family's label-keyed gauge values.
 
+    A key no endpoint reported is left out of its family rather than defaulted to zero, so a
+    caller can tell an absent gauge from an idle one.
+
     Args:
         texts: Per-node Prometheus exposition documents scraped from the cluster.
         specs: Family name to a (label, aggregation) pair.
@@ -159,8 +162,8 @@ def reduce_families(
                 key = sample.labels.get(label)
                 if key is None:
                     continue
-                if aggregation == "sum":
-                    bucket[key] = bucket.get(key, 0.0) + sample.value
+                if aggregation == "sum" and key in bucket:
+                    bucket[key] += sample.value
                 else:
                     bucket[key] = sample.value
     return reduced

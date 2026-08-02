@@ -44,17 +44,34 @@ def test_stage_pool_order():
 
 
 def test_stage_pool_runs_concurrently():
-    """A pool sized by its admission cap overlaps that many requests off the event loop."""
-    barrier = threading.Barrier(4, timeout=5)
-    pool = StagePool(stages=(lambda payload: (barrier.wait(), payload)[1],), max_concurrency=4)
+    """A pool overlaps requests up to its own width and queues the surplus behind them."""
+    width = 4
+    barrier = threading.Barrier(width, timeout=5)
+    lock = threading.Lock()
+    live = 0
+    peak = 0
+
+    def stage(payload):
+        nonlocal live, peak
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        barrier.wait()
+        with lock:
+            live -= 1
+        return payload
+
+    pool = StagePool(stages=(stage,), max_concurrency=width)
 
     async def drive():
-        return await asyncio.gather(*(pool.run(_payload()) for _ in range(4)))
+        return await asyncio.gather(*(pool.run(_payload()) for _ in range(2 * width)))
 
     try:
-        assert len(asyncio.run(drive())) == 4
+        assert len(asyncio.run(drive())) == 2 * width
     finally:
         pool.shutdown()
+    # clearing a width-wide barrier proves that many overlap and the peak proves no more do
+    assert peak == width
 
 
 def test_inference_pool():

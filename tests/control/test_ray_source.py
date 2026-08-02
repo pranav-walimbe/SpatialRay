@@ -69,13 +69,28 @@ def test_util_per_replica_ignores_idle_nodes():
     ewmas = {"inference": _Ewma(alpha=1.0)}
     observation = build_observation(0.0, view, {"inference": 1}, {"inference": GPU}, ewmas)
     assert observation.pools["inference"].utilization == 0.90
-    """A pool with no util kind reports work but zero utilization."""
+
+
+def test_pool_without_util_kind_reports_absent_utilization():
+    """A pool with no util kind reports its work gauges but no utilization at all."""
     observation = build_observation(0.0, _view(), {"decode": 4}, _kinds(), {})
     decode = observation.pools["decode"]
-    assert decode.utilization == 0.0
+    assert decode.utilization is None
     assert decode.work_in_flight == 2048.0
-    assert decode.queue_depth == 0.0
     assert decode.mean_decoded_bytes == 512.0
+
+
+def test_unreported_gauge_reads_absent_not_zero():
+    """A gauge no endpoint reported reads None while a reported zero keeps its real value."""
+    observation = build_observation(0.0, _view(), {"decode": 4}, _kinds(), {})
+    decode = observation.pools["decode"]
+    assert decode.queue_depth is None
+    assert decode.queued_depth is None
+    idle = MetricsView(node_cpu={}, node_gpu={}, work={}, queue={"transform": 0.0}, roles={})
+    transform = build_observation(0.0, idle, {"transform": 1}, {"transform": None}, {}).pools[
+        "transform"
+    ]
+    assert transform.queue_depth == 0.0
 
 
 def test_source_smooths():
@@ -106,7 +121,7 @@ def test_partial_first_scrape_is_infinitely_stale():
         util_kinds={"decode": None},
     )
     pool = source.observe().pools["decode"]
-    assert pool.queue_depth == 0.0
+    assert pool.queue_depth is None
     assert pool.stale_s == float("inf")
 
 

@@ -7,26 +7,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil
 
-from spatial_ray.policy.signals import Backlog, MaxOf, Signal, TotalBacklog, Utilization
+from spatial_ray.policy.signals import MaxOf, Signal, TotalBacklog, Utilization
 from spatial_ray.policy.types import Action, Observation
 
-_SERVE_DEFAULT_MAX_ONGOING = 5  # Ray Serve's per-replica request cap when a pool leaves it unset
 DEFAULT_TARGET_ONGOING_REQUESTS = 8.0
-
-
-def inference_queue_setpoint(max_ongoing_requests: int | None) -> float:
-    """Derive the per-replica queue setpoint as double the replica's batch concurrency.
-
-    Args:
-        max_ongoing_requests: The inference deployment's per-replica request cap, or None if unset.
-
-    Returns:
-        The queued-request setpoint one inference replica is sized to hold.
-    """
-    resolved = (
-        max_ongoing_requests if max_ongoing_requests is not None else _SERVE_DEFAULT_MAX_ONGOING
-    )
-    return 2 * resolved
 
 
 @dataclass(frozen=True)
@@ -47,15 +31,18 @@ class DynamicPolicy:
         targets: dict[str, int] = {}
         for name, signal in self.signals.items():
             pool = observation.pools.get(name)
-            if pool is not None:
-                targets[name] = ceil(signal.demand(pool))
+            if pool is None:
+                continue
+            demand = signal.demand(pool)
+            if demand is not None:
+                targets[name] = ceil(demand)
         return Action(targets=targets)
 
 
 def disaggregated_dynamic_policy(
     *,
     decode_target_ongoing_requests: float,
-    inference_queue_per_replica: float,
+    inference_target_ongoing_requests: float,
     transform_util_target: float = 0.7,
     inference_util_target: float = 0.7,
 ) -> DynamicPolicy:
@@ -63,7 +50,7 @@ def disaggregated_dynamic_policy(
 
     Args:
         decode_target_ongoing_requests: Requests one decode replica is provisioned to hold at once.
-        inference_queue_per_replica: Queued requests one inference replica is provisioned to hold.
+        inference_target_ongoing_requests: Requests one inference replica is provisioned to hold.
         transform_util_target: CPU utilization setpoint the transform pool is sized to.
         inference_util_target: GPU utilization setpoint the inference pool is sized to.
 
@@ -77,7 +64,7 @@ def disaggregated_dynamic_policy(
             "inference": MaxOf(
                 (
                     Utilization(target=inference_util_target),
-                    Backlog(per_replica=inference_queue_per_replica, metric="queue_depth"),
+                    TotalBacklog(target_ongoing_requests=inference_target_ongoing_requests),
                 )
             ),
         }

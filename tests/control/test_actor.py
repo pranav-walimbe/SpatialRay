@@ -13,7 +13,7 @@ def test_host_builds_offline():
     """The host wires its loop without a cluster and stops safely before start."""
     host = ControllerHost(
         disaggregated_dynamic_policy(
-            decode_target_ongoing_requests=1.0, inference_queue_per_replica=1.0
+            decode_target_ongoing_requests=1.0, inference_target_ongoing_requests=1.0
         ),
         {"decode": PoolBounds(min_replicas=1, max_replicas=8)},
         {"applications": []},

@@ -97,6 +97,6 @@ def build_graph(
         .options(**deployment_options(inference))
         .bind(inference.model_factory, inference.work_unit)
     )
-    options = {"num_replicas": 2, "max_ongoing_requests": 16, **dict(ingress_options or {})}
+    options = {"num_replicas": DEFAULT_NUM_REPLICAS, **dict(ingress_options or {})}
     ingress = serve.deployment(Ingress).options(name="ingress", **options)
     return ingress.bind(pools, inference_pool)

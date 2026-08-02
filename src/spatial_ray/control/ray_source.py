@@ -34,17 +34,17 @@ class _Ewma:
         self._alpha = alpha
         self._value: float | None = None
 
-    def update(self, sample: float | None) -> float:
+    def update(self, sample: float | None) -> float | None:
         """Fold a new sample into the running average and return the smoothed value.
 
         Args:
             sample: The latest raw utilization fraction, or None when the scrape missed it.
 
         Returns:
-            The updated EWMA, held unchanged across a missed sample.
+            The updated EWMA, held unchanged across a missed sample and None before the first one.
         """
         if sample is None:
-            return self._value if self._value is not None else 0.0
+            return self._value
         if self._value is None:
             self._value = sample
         else:
@@ -55,12 +55,14 @@ class _Ewma:
 def _pool_utilization(
     pool: str, kind: str | None, view: MetricsView, replicas: int
 ) -> float | None:
-    # the pool's summed node utilization divided per replica and normalized to a 0-to-1 fraction
+    # the pool's summed node utilization per replica as a fraction or None when no node reported
     if kind is None or replicas <= 0:
         return None
     source = view.node_gpu if kind == GPU else view.node_cpu
-    ips = [ip for ip, role in view.roles.items() if role == pool]
-    return sum(source.get(ip, 0.0) for ip in ips) / replicas / 100.0
+    readings = [source[ip] for ip, role in view.roles.items() if role == pool and ip in source]
+    if not readings:
+        return None
+    return sum(readings) / replicas / 100.0
 
 
 def build_observation(
@@ -102,16 +104,16 @@ def build_observation(
         raw = _pool_utilization(name, util_kinds.get(name), view, count)
         if view.complete:
             gauges = {
-                "queue_depth": view.queue.get(name, 0.0),
-                "queued_depth": view.queued.get(name, 0.0),
-                "work_in_flight": view.work.get(name, 0.0),
-                "mean_decoded_bytes": view.mean_bytes.get(name, 0.0),
+                "queue_depth": view.queue.get(name),
+                "queued_depth": view.queued.get(name),
+                "work_in_flight": view.work.get(name),
+                "mean_decoded_bytes": view.mean_bytes.get(name),
             }
             held[name] = gauges
         else:
-            gauges = held.get(name, dict.fromkeys(_GAUGE_FIELDS, 0.0))
+            gauges = held.get(name, dict.fromkeys(_GAUGE_FIELDS, None))
             raw = None
-        smoothed = ewmas[name].update(raw) if name in ewmas else (raw or 0.0)
+        smoothed = ewmas[name].update(raw) if name in ewmas else raw
         pools[name] = PoolObservation(
             name=name, replicas=count, utilization=smoothed, stale_s=stale_s, **gauges
         )

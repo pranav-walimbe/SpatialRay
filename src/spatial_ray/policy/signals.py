@@ -13,14 +13,14 @@ from spatial_ray.policy.types import PoolObservation
 class Signal(Protocol):
     """A mapping from a pool's observation to the replica count that signal alone demands."""
 
-    def demand(self, pool: PoolObservation) -> float:
+    def demand(self, pool: PoolObservation) -> float | None:
         """Compute the replicas this signal would request for the pool.
 
         Args:
             pool: The pool's latest per-replica signals.
 
         Returns:
-            The fractional replica count that holds the signal at its setpoint.
+            The replicas holding the signal at its setpoint.
         """
         ...
 
@@ -31,7 +31,7 @@ class Utilization:
 
     target: float  # setpoint saturation fraction the pool is provisioned to hold
 
-    def demand(self, pool: PoolObservation) -> float:
+    def demand(self, pool: PoolObservation) -> float | None:
         """Scale replicas by the ratio of observed utilization to the target.
 
         Args:
@@ -40,6 +40,8 @@ class Utilization:
         Returns:
             The replicas that pull utilization back down to the target.
         """
+        if pool.utilization is None:
+            return None
         return pool.replicas * pool.utilization / self.target
 
 
@@ -50,7 +52,7 @@ class Backlog:
     per_replica: float  # backlog units one replica is provisioned to drain
     metric: str  # PoolObservation field read by name, work_in_flight or queue_depth
 
-    def demand(self, pool: PoolObservation) -> float:
+    def demand(self, pool: PoolObservation) -> float | None:
         """Divide the observed backlog by the per-replica capacity.
 
         Args:
@@ -59,7 +61,10 @@ class Backlog:
         Returns:
             The replicas that keep the backlog at the per-replica capacity.
         """
-        return getattr(pool, self.metric) / self.per_replica
+        backlog = getattr(pool, self.metric)
+        if backlog is None:
+            return None
+        return backlog / self.per_replica
 
 
 @dataclass(frozen=True)
@@ -68,7 +73,7 @@ class TotalBacklog:
 
     target_ongoing_requests: float  # requests one replica is provisioned to hold at once
 
-    def demand(self, pool: PoolObservation) -> float:
+    def demand(self, pool: PoolObservation) -> float | None:
         """Divide the pool's running and router-queued requests by the per-replica target.
 
         Args:
@@ -77,6 +82,8 @@ class TotalBacklog:
         Returns:
             The replicas that hold every replica at the target ongoing requests.
         """
+        if pool.queue_depth is None or pool.queued_depth is None:
+            return None
         return (pool.queue_depth + pool.queued_depth) / self.target_ongoing_requests
 
 
@@ -86,7 +93,7 @@ class AdaptiveBacklog:
 
     max_ongoing_requests: int  # per-replica request cap the byte setpoint scales with
 
-    def demand(self, pool: PoolObservation) -> float:
+    def demand(self, pool: PoolObservation) -> float | None:
         """Divide bytes in flight by the concurrency-scaled per-replica byte setpoint.
 
         Args:
@@ -96,6 +103,8 @@ class AdaptiveBacklog:
             The replicas that hold each at max_ongoing_requests mean-sized requests, or zero
             before any request has set the mean.
         """
+        if pool.work_in_flight is None or pool.mean_decoded_bytes is None:
+            return None
         if pool.mean_decoded_bytes <= 0.0:
             return 0.0
         return pool.work_in_flight / (self.max_ongoing_requests * pool.mean_decoded_bytes)
@@ -107,8 +116,8 @@ class MaxOf:
 
     signals: tuple[Signal, ...]  # component signals whose demands are reduced by max
 
-    def demand(self, pool: PoolObservation) -> float:
-        """Take the largest demand across the component signals.
+    def demand(self, pool: PoolObservation) -> float | None:
+        """Take the largest demand across the component signals that have an opinion.
 
         Args:
             pool: The pool passed to each component signal.
@@ -116,4 +125,8 @@ class MaxOf:
         Returns:
             The maximum replica demand so the hottest bottleneck is satisfied.
         """
-        return max(signal.demand(pool) for signal in self.signals)
+        demands = [signal.demand(pool) for signal in self.signals]
+        reported = [demand for demand in demands if demand is not None]
+        if not reported:
+            return None
+        return max(reported)

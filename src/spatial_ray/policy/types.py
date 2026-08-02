@@ -11,13 +11,15 @@ from dataclasses import dataclass, field
 class PoolObservation:
     name: str  # Serve deployment name of the pool
     replicas: int  # live replica count reconciled by Serve
-    queue_depth: float  # requests being processed across the pool's replicas
+    queue_depth: float | None  # requests processing across the replicas or None when unreported
     work_in_flight: (
-        float  # spatialray_work_in_flight gauge sum, bytes for decode and tiles elsewhere
+        float | None  # work gauge sum of bytes for decode and tiles elsewhere or None when absent
     )
-    utilization: float  # EWMA-smoothed saturation fraction, CPU for transform and GPU for inference
-    mean_decoded_bytes: float = 0.0  # EWMA decoded bytes per request, sizing decode's byte backlog
-    queued_depth: float = 0.0  # requests waiting at the routers for a replica of this pool
+    utilization: float | None  # EWMA saturation fraction of its node or None when unreported
+    mean_decoded_bytes: float | None = (
+        None  # EWMA decoded bytes per request sizing decode's backlog
+    )
+    queued_depth: float | None = None  # requests waiting at the routers for a replica of this pool
     stale_s: float = 0.0  # seconds since these gauges last came from a whole scrape
 
 

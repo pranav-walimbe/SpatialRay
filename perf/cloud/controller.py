@@ -16,11 +16,9 @@ from spatial_ray.control.controller import DEFAULT_TICK_S, DEFAULT_WARMUP_S
 from spatial_ray.policy.dynamic import (
     DEFAULT_TARGET_ONGOING_REQUESTS,
     disaggregated_dynamic_policy,
-    inference_queue_setpoint,
 )
 from spatial_ray.policy.interfaces import Policy
 from spatial_ray.policy.types import Action, Observation
-from spatial_ray.serve.application import Application
 
 
 def pool_bounds(pools_cfg: Mapping[str, Any]) -> dict[str, PoolBounds]:
@@ -57,21 +55,24 @@ class _LoggingPolicy:
         parts = []
         for name, pool in observation.pools.items():
             want = action.targets.get(name)
+            util = "-" if pool.utilization is None else f"{pool.utilization:.2f}"
+            run = "-" if pool.queue_depth is None else f"{pool.queue_depth:.0f}"
+            queued = "-" if pool.queued_depth is None else f"{pool.queued_depth:.0f}"
+            work = "-" if pool.work_in_flight is None else f"{pool.work_in_flight:.0f}"
             parts.append(
-                f"{name}(util={pool.utilization:.2f} run={pool.queue_depth:.0f} "
-                f"q={pool.queued_depth:.0f} rep={pool.replicas} want={want} "
+                f"{name}(util={util} run={run} q={queued} work={work} "
+                f"rep={pool.replicas} want={'hold' if want is None else want} "
                 f"stale={pool.stale_s:.0f}s)"
             )
         print("[controller] " + " ".join(parts))
         return action
 
 
-def build_policy(controller_cfg: Mapping[str, Any], application: Application) -> Policy:
-    """Map the controller config and application specs onto the dynamic policy.
+def build_policy(controller_cfg: Mapping[str, Any]) -> Policy:
+    """Map the controller config onto the dynamic policy.
 
     Args:
         controller_cfg: The controller section of the cloud config.
-        application: The deployed application whose inference spec sets the queue setpoint.
 
     Returns:
         A logging-wrapped dynamic policy pairing each pool with its own bottleneck signal.
@@ -80,8 +81,8 @@ def build_policy(controller_cfg: Mapping[str, Any], application: Application) ->
         decode_target_ongoing_requests=controller_cfg.get(
             "decode_target_ongoing_requests", DEFAULT_TARGET_ONGOING_REQUESTS
         ),
-        inference_queue_per_replica=inference_queue_setpoint(
-            application.inference.max_ongoing_requests
+        inference_target_ongoing_requests=controller_cfg.get(
+            "inference_target_ongoing_requests", DEFAULT_TARGET_ONGOING_REQUESTS
         ),
         transform_util_target=controller_cfg["transform_util_target"],
         inference_util_target=controller_cfg["inference_util_target"],
@@ -102,7 +103,7 @@ def start_controller(model_name: str, hardware: str):
     config = load_config()
     application = from_config(model_name, hardware)
     return launch_detached(
-        build_policy(config["controller"], application),
+        build_policy(config["controller"]),
         pool_bounds(config["pools"]),
         application.serve_config,
         app_name=application.app_name,
