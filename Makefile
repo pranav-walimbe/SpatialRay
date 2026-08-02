@@ -2,7 +2,7 @@
 
 REGION ?= us-west-2
 
-.PHONY: sync fix lint test ci perf-preprocess perf-serve clear-ec2
+.PHONY: sync fix lint test ci perf-cloud clear-ec2
 
 sync:
 	uv sync --group dev
@@ -19,6 +19,15 @@ test:
 	uv run pytest || [ $$? -eq 5 ]
 
 ci: lint test
+
+# default cloud run
+perf-cloud:
+	uv run python -m perf.cloud.launch \
+	  --hardware gpu \
+	  --model prithvi_eo_v1_100m \
+	  --requests 1000 \
+	  --rate 10 \
+	  --debug
 
 # terminate all spatialray-perf instances
 clear-ec2:

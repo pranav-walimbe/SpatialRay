@@ -59,7 +59,7 @@ pools:
 ingress:
   node: transform
   replicas: 2
-  max_ongoing_requests: 24
+  max_ongoing_requests: 36
 
 # dynamic-policy inputs
 controller:

@@ -16,6 +16,9 @@ from spatial_ray.workload.stages import decode, normalize, reproject_stage, tile
 
 DEFAULT_NUM_REPLICAS = 1
 
+# zero writes the ongoing-request gauge inline rather than caching it on the replica's event loop
+REPLICA_ENV_VARS = {"RAY_SERVE_METRICS_EXPORT_INTERVAL_MS": "0"}
+
 
 @dataclass(frozen=True)
 class PoolSpec:
@@ -60,7 +63,10 @@ def deployment_options(spec: PoolSpec | InferenceSpec) -> dict[str, Any]:
     """
     options: dict[str, Any] = {
         "name": spec.name,
-        "ray_actor_options": dict(spec.ray_actor_options),
+        "ray_actor_options": {
+            "runtime_env": {"env_vars": REPLICA_ENV_VARS},
+            **spec.ray_actor_options,
+        },
     }
     if spec.max_ongoing_requests is not None:
         options["max_ongoing_requests"] = spec.max_ongoing_requests
@@ -99,5 +105,9 @@ def build_graph(
         .bind(inference.model_factory, inference.work_unit, inference.max_concurrency)
     )
     options = {"num_replicas": DEFAULT_NUM_REPLICAS, **dict(ingress_options or {})}
+    options["ray_actor_options"] = {
+        "runtime_env": {"env_vars": REPLICA_ENV_VARS},
+        **options.get("ray_actor_options", {}),
+    }
     ingress = serve.deployment(Ingress).options(name="ingress", **options)
     return ingress.bind(pools, inference_pool)

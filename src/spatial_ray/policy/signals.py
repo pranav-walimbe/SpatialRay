@@ -82,9 +82,13 @@ class TotalBacklog:
         Returns:
             The replicas that hold every replica at the target ongoing requests.
         """
-        if pool.queue_depth is None or pool.queued_depth is None:
+        counts = [c for c in (pool.queue_depth, pool.queued_depth) if c is not None]
+        if not counts:
             return None
-        return (pool.queue_depth + pool.queued_depth) / self.target_ongoing_requests
+        demand = sum(counts) / self.target_ongoing_requests
+        if len(counts) < 2:
+            return max(demand, float(pool.replicas))
+        return demand
 
 
 @dataclass(frozen=True)

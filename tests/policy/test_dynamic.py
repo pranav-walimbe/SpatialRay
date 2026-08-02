@@ -94,6 +94,15 @@ def test_total_backlog_signal():
     assert signal.demand(_pool("d", queue_depth=16.0, queued_depth=48.0)) == 8.0
 
 
+def test_total_backlog_on_one_count_can_only_raise():
+    """One missing count leaves a lower bound that grows the pool but never shrinks it."""
+    signal = TotalBacklog(target_ongoing_requests=8.0)
+    loaded = _pool("decode", replicas=3, queue_depth=36.0, queued_depth=None)
+    assert signal.demand(loaded) == 4.5
+    quiet = _pool("decode", replicas=3, queue_depth=8.0, queued_depth=None)
+    assert signal.demand(quiet) == 3.0
+
+
 def test_total_backlog_exceeds_current_replicas():
     """Router-queued demand lets decode ask for more replicas than it already runs."""
     signal = TotalBacklog(target_ongoing_requests=8.0)
@@ -107,7 +116,8 @@ def test_signals_have_no_opinion_on_an_absent_gauge():
     assert (
         Backlog(per_replica=4.0, metric="queue_depth").demand(_pool("d", queue_depth=None)) is None
     )
-    assert TotalBacklog(target_ongoing_requests=8.0).demand(_pool("d", queue_depth=None)) is None
+    absent = _pool("d", queue_depth=None, queued_depth=None)
+    assert TotalBacklog(target_ongoing_requests=8.0).demand(absent) is None
     assert AdaptiveBacklog(max_ongoing_requests=4).demand(_pool("d", work_in_flight=None)) is None
 
 

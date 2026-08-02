@@ -21,3 +21,13 @@ def test_compile_serve_config():
     deployments = {d["name"]: d for d in app["deployments"]}
     assert list(deployments) == ["decode", "transform", "inference"]
     assert deployments["decode"]["max_ongoing_requests"] == 12
+
+
+def test_every_deployment_writes_its_gauge_inline():
+    """Each replica gets the env var switching Serve off its event-loop-cached gauge export."""
+    config = compile_serve_config(
+        DISAGGREGATED, InferenceSpec(model_factory=lambda: None), import_path="perf.cloud.app:app"
+    )
+    for deployment in config["applications"][0]["deployments"]:
+        env_vars = deployment["ray_actor_options"]["runtime_env"]["env_vars"]
+        assert env_vars["RAY_SERVE_METRICS_EXPORT_INTERVAL_MS"] == "0"
