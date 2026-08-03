@@ -41,15 +41,6 @@ class Scrape:
     texts: tuple[str, ...]  # exposition document from each endpoint that answered
     failed: tuple[str, ...]  # endpoints that did not answer so their gauges are absent not zero
 
-    @property
-    def complete(self) -> bool:
-        """Whether every endpoint answered so a missing gauge really means zero.
-
-        Returns:
-            True when no endpoint was skipped.
-        """
-        return not self.failed
-
 
 @dataclass(frozen=True)
 class MetricsView:
@@ -67,7 +58,6 @@ class MetricsView:
     queued_handles: dict[str, int] = field(
         default_factory=dict
     )  # deployment to the routers that reported a queued gauge
-    complete: bool = True  # whether every endpoint answered so a missing gauge means zero load
 
 
 def metrics_endpoints() -> list[str]:
@@ -177,18 +167,15 @@ def reduce_families(
     return reduced, reporters
 
 
-def parse_metrics_view(
-    scraped: Scrape, roles: Mapping[str, str], *, complete: bool | None = None
-) -> MetricsView:
+def parse_metrics_view(scraped: Scrape, roles: Mapping[str, str]) -> MetricsView:
     """Reduce one scrape into the per-node and per-deployment gauges an observation reads.
 
     Args:
         scraped: The documents that answered plus the endpoints that did not.
         roles: Node ip to the pool it hosts, carried through onto the view.
-        complete: Override for whether the scrape was whole, defaulting to the scrape's own verdict.
 
     Returns:
-        A MetricsView of the node and deployment gauges, flagged with whether the scrape was whole.
+        A MetricsView of the node and deployment gauges.
     """
     reduced, reporters = reduce_families(list(scraped.texts), _VIEW_SPECS)
     return MetricsView(
@@ -200,7 +187,6 @@ def parse_metrics_view(
         mean_bytes=reduced[MEAN_BYTES],
         queued=reduced[QUEUED],
         queued_handles=reporters[QUEUED],
-        complete=scraped.complete if complete is None else complete,
     )
 
 

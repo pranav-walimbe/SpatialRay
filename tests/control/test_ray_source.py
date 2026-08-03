@@ -143,19 +143,35 @@ def test_source_smooths():
     assert second == 1.0
 
 
-def test_partial_first_scrape_is_infinitely_stale():
-    """With no whole scrape yet there is no last good reading to scale on."""
-    partial = MetricsView(
-        node_cpu={}, node_gpu={}, work={}, queue={}, roles={"t1": "decode"}, complete=False
-    )
+def test_first_scrape_without_gauges_reads_absent():
+    """With nothing seen yet a gauge reads absent and ages nothing, leaving the pool to be held."""
+    empty = MetricsView(node_cpu={}, node_gpu={}, work={}, queue={}, roles={"t1": "decode"})
     source = RayObservationSource(
-        read_metrics=lambda: partial,
+        read_metrics=lambda: empty,
         read_replicas=lambda: {"decode": 3},
         util_kinds={"decode": None},
     )
     pool = source.observe().pools["decode"]
     assert pool.queue_depth is None
-    assert pool.stale_s == float("inf")
+    assert pool.stale_s == 0.0
+
+
+def test_whole_scrape_missing_gauges_holds_last_good():
+    """A scrape answering everywhere but omitting a gauge carries it forward instead of wiping."""
+    whole = MetricsView(
+        node_cpu={}, node_gpu={}, work={}, queue={"decode": 30.0}, roles={}, queued={"decode": 4.0}
+    )
+    silent = MetricsView(node_cpu={}, node_gpu={}, work={}, queue={}, roles={})
+    views = iter([whole, silent])
+    source = RayObservationSource(
+        read_metrics=lambda: next(views),
+        read_replicas=lambda: {"decode": 1},
+        util_kinds={"decode": None},
+    )
+    assert source.observe().pools["decode"].queue_depth == 30.0
+    held = source.observe().pools["decode"]
+    assert (held.queue_depth, held.queued_depth) == (30.0, 4.0)
+    assert held.stale_s > 0.0
 
 
 def test_partial_scrape_holds_last_good():
@@ -168,9 +184,7 @@ def test_partial_scrape_holds_last_good():
         roles={"t1": "decode"},
         queued={"decode": 50.0},
     )
-    partial = MetricsView(
-        node_cpu={}, node_gpu={}, work={}, queue={}, roles={"t1": "decode"}, complete=False
-    )
+    partial = MetricsView(node_cpu={}, node_gpu={}, work={}, queue={}, roles={"t1": "decode"})
     views = iter([whole, partial, partial])
     source = RayObservationSource(
         read_metrics=lambda: next(views),

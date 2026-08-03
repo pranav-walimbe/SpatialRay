@@ -59,7 +59,6 @@ def test_parse_metrics_view():
     assert view.queued == {"decode": 10.0}
     assert view.queued_handles == {"decode": 2}
     assert view.roles == roles
-    assert view.complete
 
 
 def test_queue_gauges_mean_over_the_sources_that_reported():
@@ -71,6 +70,8 @@ def test_queue_gauges_mean_over_the_sources_that_reported():
 
 
 def test_parse_metrics_view_partial():
-    """A scrape missing an endpoint is flagged incomplete so absent gauges are not read as zero."""
+    """An unanswered endpoint leaves its gauges absent rather than reducing them to zero."""
     view = parse_metrics_view(Scrape(texts=(_node_a(),), failed=("http://b:8080/metrics",)), {})
-    assert not view.complete
+    assert view.queued == {}
+    assert view.work == {}
+    assert view.mean_bytes == {}
