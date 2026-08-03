@@ -36,9 +36,6 @@ def main() -> None:
     parser.add_argument(
         "--rate", type=float, default=1.0, help="mean Poisson arrival rate in requests/s"
     )
-    parser.add_argument(
-        "--debug", action="store_true", help="write the controller log next to the report"
-    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -56,8 +53,7 @@ def main() -> None:
         _wait_for_success(s3, ec2, cfg, run_id, instance_ids)
         _download(s3, cfg, run_id, "result.txt", report_path)
         print(f"wrote {report_path}")
-        if args.debug:
-            _write_controller_log(s3, cfg, run_id, report_path.with_suffix(".log"))
+        _write_run_logs(s3, cfg, run_id, report_path)
     finally:
         if instance_ids:
             ec2.terminate_instances(InstanceIds=instance_ids)
@@ -226,14 +222,19 @@ def _download(s3, cfg, run_id, name, dest):
     s3.download_file(cfg["result_bucket"], key, str(dest))
 
 
-def _write_controller_log(s3, cfg, run_id, dest):
-    # keep only the controller's per-tick lines from the head progress log
+def _write_run_logs(s3, cfg, run_id, report_path):
+    # the head node's whole progress log plus the controller-only view of its per-tick lines
     key = f"{_RESULT_PREFIX}/{run_id}/progress.log"
     body = s3.get_object(Bucket=cfg["result_bucket"], Key=key)["Body"].read().decode()
-    lines = [line for line in body.splitlines() if "[controller]" in line]
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text("\n".join(lines) + "\n")
-    print(f"wrote {dest}")
+    lines = body.splitlines()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    written = {
+        report_path.with_name(f"{report_path.stem}-progress.log"): lines,
+        report_path.with_suffix(".log"): [line for line in lines if "[controller]" in line],
+    }
+    for dest, selected in written.items():
+        dest.write_text("\n".join(selected) + "\n")
+        print(f"wrote {dest}")
 
 
 if __name__ == "__main__":

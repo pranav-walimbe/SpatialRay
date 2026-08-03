@@ -21,13 +21,12 @@ test:
 ci: lint test
 
 # default cloud run
-perf-cloud:
+perf:
 	uv run python -m perf.cloud.launch \
 	  --hardware gpu \
 	  --model prithvi_eo_v1_100m \
 	  --requests 1000 \
-	  --rate 10 \
-	  --debug
+	  --rate 10
 
 # terminate all spatialray-perf instances
 clear-ec2:
