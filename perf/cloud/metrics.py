@@ -70,15 +70,59 @@ def parse_snapshot(scraped: Scrape, t_s: float) -> Snapshot:
     )
 
 
-def deployment_latency(texts: list[str]) -> dict[str, dict]:
-    """Reduce the cumulative processing-latency histogram to per-deployment latency stats.
+@dataclass(frozen=True)
+class _LatencyCounters:
+    count: float  # requests the histogram has observed
+    total: float  # summed processing latency in ms across those requests
+    buckets: dict[float, float]  # upper bound in ms to the cumulative count at or below it
 
-    Args:
-        texts: Per-node Prometheus exposition documents scraped from the cluster.
 
-    Returns:
-        Deployment name to its request count, mean, p50, and p99 latency in ms.
-    """
+class LatencyAccumulator:
+    """Folds each scrape's latency counters forward so replicas killed mid-run stay counted."""
+
+    def __init__(self) -> None:
+        self._banked: dict[str, _LatencyCounters] = {}
+        self._previous: dict[str, _LatencyCounters] = {}
+
+    def update(self, texts: list[str]) -> None:
+        """Fold one scrape's cumulative latency histogram into the running totals.
+
+        Args:
+            texts: Per-node Prometheus exposition documents scraped from the cluster.
+        """
+        for deployment, scraped in _latency_counters(texts).items():
+            self._banked[deployment] = _advance(
+                self._banked.get(deployment), self._previous.get(deployment), scraped
+            )
+            self._previous[deployment] = scraped
+
+    def stats(self) -> dict[str, dict]:
+        """Reduce the accumulated counters to per-deployment latency stats.
+
+        Returns:
+            Deployment name to its request count, mean, p50, and p99 latency in ms.
+        """
+        return {deployment: _stats(counters) for deployment, counters in self._banked.items()}
+
+
+def _advance(banked, previous, scraped):
+    # bank only each counter's positive delta so a dying replica's drop keeps what it already did
+    if banked is None or previous is None:
+        return scraped
+    keys = set(banked.buckets) | set(scraped.buckets)
+    return _LatencyCounters(
+        count=banked.count + max(0.0, scraped.count - previous.count),
+        total=banked.total + max(0.0, scraped.total - previous.total),
+        buckets={
+            le: banked.buckets.get(le, 0.0)
+            + max(0.0, scraped.buckets.get(le, 0.0) - previous.buckets.get(le, 0.0))
+            for le in keys
+        },
+    )
+
+
+def _latency_counters(texts):
+    # one scrape's cumulative latency histogram per deployment, summed over the replicas reporting
     counts: dict[str, float] = defaultdict(float)
     sums: dict[str, float] = defaultdict(float)
     buckets: dict[str, dict[float, float]] = defaultdict(lambda: defaultdict(float))
@@ -96,16 +140,23 @@ def deployment_latency(texts: list[str]) -> dict[str, dict]:
                     sums[deployment] += sample.value
                 elif sample.name.endswith("_bucket"):
                     buckets[deployment][float(sample.labels["le"])] += sample.value
-    stats = {}
-    for deployment, count in counts.items():
-        ordered = sorted(buckets[deployment].items())
-        stats[deployment] = {
-            "n_requests": int(count),
-            "latency_mean_ms": sums[deployment] / count if count else 0.0,
-            "latency_p50_ms": _histogram_quantile(ordered, 0.50),
-            "latency_p99_ms": _histogram_quantile(ordered, 0.99),
-        }
-    return stats
+    return {
+        deployment: _LatencyCounters(
+            count=count, total=sums[deployment], buckets=dict(buckets[deployment])
+        )
+        for deployment, count in counts.items()
+    }
+
+
+def _stats(counters):
+    # one deployment's accumulated counters reduced to the report's latency columns
+    ordered = sorted(counters.buckets.items())
+    return {
+        "n_requests": int(counters.count),
+        "latency_mean_ms": counters.total / counters.count if counters.count else 0.0,
+        "latency_p50_ms": _histogram_quantile(ordered, 0.50),
+        "latency_p99_ms": _histogram_quantile(ordered, 0.99),
+    }
 
 
 def _histogram_quantile(buckets: list[tuple[float, float]], quantile: float) -> float:

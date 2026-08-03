@@ -71,7 +71,7 @@ def save_text_report(report: Report, path) -> None:
     gpu_rows = []
     for ip in _keys(report.samples, "node_gpu"):
         util = _reduce(report.samples, "node_gpu", ip)
-        vram = _reduce(report.samples, "node_gram", ip, _GIB)
+        vram = _reduce(report.samples, "node_gram", ip, _GIB / _MIB)
         if util is None and vram is None:
             continue
         util_cells = (f"{util[0]:.2f}", f"{util[1]:.2f}") if util else ("-", "-")

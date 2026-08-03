@@ -13,7 +13,7 @@ from ray import serve
 
 from perf.cloud.app import from_config
 from perf.cloud.controller import start_controller, stop_controller
-from perf.cloud.metrics import Snapshot, deployment_latency, parse_snapshot
+from perf.cloud.metrics import LatencyAccumulator, Snapshot, parse_snapshot
 from perf.common.models import load
 from perf.common.trace import build_default_trace
 from spatial_ray.control.ray_metrics import metrics_endpoints, node_roles, scrape
@@ -56,8 +56,9 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         endpoints = metrics_endpoints()
         roles = node_roles()
         samples: list[Snapshot] = []
-        wall_s = asyncio.run(_run_load(handle, trace, endpoints, samples))
-        latency = deployment_latency(list(scrape(endpoints).texts))
+        latency = LatencyAccumulator()
+        wall_s = asyncio.run(_run_load(handle, trace, endpoints, samples, latency))
+        latency.update(list(scrape(endpoints).texts))
     finally:
         stop_controller()
         serve.shutdown()
@@ -70,7 +71,7 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         rate_per_s=rate_per_s,
         wall_s=wall_s,
         samples=tuple(samples),
-        latency=latency,
+        latency=latency.stats(),
         roles=roles,
         work_units=_work_units(application.grouping, application.inference),
     )
@@ -84,10 +85,10 @@ def _work_units(pools, inference):
     return units
 
 
-async def _run_load(handle, trace, endpoints, samples):
+async def _run_load(handle, trace, endpoints, samples, latency):
     # pace the trace with an async sampler ticking in the same loop
     start = time.perf_counter()
-    sampler = asyncio.create_task(_sampler(endpoints, samples, start))
+    sampler = asyncio.create_task(_sampler(endpoints, samples, start, latency))
     try:
         await _drive(handle, trace, start)
     finally:
@@ -99,19 +100,23 @@ async def _run_load(handle, trace, endpoints, samples):
     return time.perf_counter() - start
 
 
-async def _sampler(endpoints, samples, start):
-    # scrape each interval off the event loop to keep pacing responsive
+async def _sampler(endpoints, samples, start, latency):
+    # scrape off the event loop on a fixed deadline
+    deadline = time.perf_counter()
     while True:
         try:
-            samples.append(await asyncio.to_thread(_take_snapshot, endpoints, start))
+            samples.append(await asyncio.to_thread(_take_snapshot, endpoints, start, latency))
         except Exception as error:
             print(f"metrics sample skipped: {error}")
-        await asyncio.sleep(_SAMPLE_INTERVAL_S)
+        deadline = max(deadline + _SAMPLE_INTERVAL_S, time.perf_counter())
+        await asyncio.sleep(deadline - time.perf_counter())
 
 
-def _take_snapshot(endpoints, start):
-    # blocking scrape and parse stamped with elapsed run time
-    return parse_snapshot(scrape(endpoints), time.perf_counter() - start)
+def _take_snapshot(endpoints, start, latency):
+    # one blocking scrape folded into the latency totals and parsed into a timestamped snapshot
+    scraped = scrape(endpoints)
+    latency.update(list(scraped.texts))
+    return parse_snapshot(scraped, time.perf_counter() - start)
 
 
 async def _drive(handle, trace, start):
