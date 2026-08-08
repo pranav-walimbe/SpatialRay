@@ -9,9 +9,9 @@ import os
 
 from perf.cloud.utils import load_config
 from perf.common.models import DEFAULT_MODEL, load
-from spatial_ray.control.ray_metrics import node_resource
 from spatial_ray.serve.application import Application
 from spatial_ray.serve.graph import DISAGGREGATED, InferenceSpec
+from spatial_ray.serve.resources import node_resource
 
 APP_NAME = "spatialray"
 _IMPORT_PATH = "perf.cloud.app:app"

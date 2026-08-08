@@ -5,6 +5,7 @@ The Serve deployment classes for the disaggregated pipeline pools and the compos
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -12,47 +13,21 @@ from contextlib import contextmanager, nullcontext
 
 from ray.serve import metrics
 
+from spatial_ray.scaling.meter import WorkEstimator, WorkloadMeter
 from spatial_ray.serve.messages import Predictions
-from spatial_ray.workload.cost import decoded_bytes, predicted_tiles
+from spatial_ray.workload.cost import decoded_bytes, predicted_pixel_bands, predicted_tiles
 from spatial_ray.workload.metadata import RasterPayload, RasterRequest
 from spatial_ray.workload.profiler import Stage
 from spatial_ray.workload.stages.decode import _DECODE_NUM_WORKERS, decode
 
+logger = logging.getLogger(__name__)
+
 # Maps a pool's work-unit label to the function weighting a payload by that unit
 _WORK_WEIGHT: dict[str, Callable[[RasterPayload], float]] = {
     "bytes": lambda payload: float(decoded_bytes(payload.request)),
+    "pixel_bands": lambda payload: float(predicted_pixel_bands(payload.request)),
     "tiles": lambda payload: float(predicted_tiles(payload.request)),
 }
-
-_MEAN_BYTES_ALPHA = (
-    0.05  # slow per-request EWMA so the mean tracks the workload regime not one request
-)
-
-
-class _MeanBytesGauge:
-    """A per-replica EWMA gauge of the decoded bytes per request the decode pool sees."""
-
-    def __init__(self) -> None:
-        self._mean: float | None = None
-        self._lock = threading.Lock()
-        self._gauge = metrics.Gauge(
-            "spatialray_mean_decoded_bytes",
-            description="EWMA of the decoded array bytes per request this decode replica sees.",
-        )
-
-    def record(self, request: RasterRequest) -> None:
-        """Fold this request's decoded byte size into the running mean and publish it.
-
-        Args:
-            request: Request whose AOI window and bands set its decoded byte size.
-        """
-        sample = float(decoded_bytes(request))
-        with self._lock:
-            if self._mean is None:
-                self._mean = sample
-            else:
-                self._mean = _MEAN_BYTES_ALPHA * sample + (1.0 - _MEAN_BYTES_ALPHA) * self._mean
-            self._gauge.set(self._mean)
 
 
 class _WorkGauge:
@@ -113,8 +88,6 @@ class StagePool:
         self._work = (
             _WorkGauge(work_unit, _WORK_WEIGHT[work_unit]) if work_unit is not None else None
         )
-        # the byte-work pool also tracks its mean request size so decode can size on live bytes
-        self._mean_bytes = _MeanBytesGauge() if work_unit == "bytes" else None
 
     async def run(self, payload: RasterPayload) -> RasterPayload:
         """Run this pool's stages in order on the payload, off the replica's event loop.
@@ -136,8 +109,6 @@ class StagePool:
 
     def _run_stages(self, payload: RasterPayload) -> RasterPayload:
         # the blocking stage chain with the work gauge held up while the payload is in flight
-        if self._mean_bytes is not None:
-            self._mean_bytes.record(payload.request)
         with self._work.track(payload) if self._work is not None else nullcontext():
             for stage in self._stages:
                 payload = stage(payload, self._io_pool) if stage is decode else stage(payload)
@@ -188,9 +159,12 @@ class InferencePool:
 
 
 class Ingress:
-    def __init__(self, pools, inference) -> None:
+    def __init__(
+        self, pools, inference, work_estimators: dict[str, WorkEstimator] | None = None
+    ) -> None:
         self._pools = pools
         self._inference = inference
+        self._workload = WorkloadMeter(work_estimators) if work_estimators else None
 
     async def __call__(self, request: RasterRequest) -> Predictions:
         """Compose the preprocessing pools then inference for one request.
@@ -201,7 +175,20 @@ class Ingress:
         Returns:
             Predictions produced for the request.
         """
+        if self._workload is not None:
+            try:
+                self._workload.record(request)
+            except Exception:
+                logger.exception("Work estimation failed, holding autoscaling metrics")
         response = self._pools[0].run.remote(RasterPayload(request=request))
         for pool in self._pools[1:]:
             response = pool.run.remote(response)
         return await self._inference.infer.remote(response)
+
+    def record_autoscaling_stats(self) -> dict[str, float]:
+        """Report recent stage work arrival rates to Ray Serve.
+
+        Returns:
+            Custom autoscaling metrics keyed by stable SpatialRay metric names.
+        """
+        return self._workload.snapshot() if self._workload is not None else {}

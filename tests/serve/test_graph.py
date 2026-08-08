@@ -11,6 +11,7 @@ from spatial_ray.serve.graph import (
     build_graph,
     deployment_options,
 )
+from spatial_ray.serve.resources import node_resource
 from spatial_ray.workload.stages import decode, normalize, reproject_stage, tile
 
 
@@ -47,3 +48,8 @@ def test_options_autoscaling():
     options = deployment_options(spec)
     assert options["autoscaling_config"] == {"min_replicas": 1, "max_replicas": 8}
     assert "num_replicas" not in options
+
+
+def test_node_resource_uses_the_pool_name():
+    """Pool placement uses one predictable custom Ray resource key."""
+    assert node_resource("inference") == "inference_node"

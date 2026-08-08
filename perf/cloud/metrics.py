@@ -4,24 +4,26 @@ Reduces the cloud harness scrapes into time-series memory snapshots and per-depl
 
 from __future__ import annotations
 
+import urllib.request
 from collections import defaultdict
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+import ray
 from prometheus_client.parser import text_string_to_metric_families
 
-from spatial_ray.control.ray_metrics import (
-    NODE_CPU,
-    NODE_GPU,
-    NODE_GRAM,
-    NODE_MEM,
-    QUEUE,
-    QUEUED,
-    WORK,
-    Scrape,
-    reduce_families,
-)
+NODE_CPU = "ray_node_cpu_utilization"
+NODE_GPU = "ray_node_gpus_utilization"
+NODE_GRAM = "ray_node_gram_used"
+NODE_MEM = "ray_node_mem_used"
+WORK = "ray_spatialray_work_in_flight"
+QUEUE = "ray_serve_replica_processing_queries"
+QUEUED = "ray_serve_deployment_queued_queries"
 
 _LATENCY = "ray_serve_deployment_processing_latency_ms"
+_NODE_RESOURCE_SUFFIX = "_node"
+_SCRAPE_TIMEOUT_S = 2
 
 # per-family reduction the plotted snapshot reads, each family with its label and aggregation
 _SNAPSHOT_SPECS = {
@@ -33,6 +35,107 @@ _SNAPSHOT_SPECS = {
     QUEUE: ("deployment", "sum"),
     QUEUED: ("deployment", "sum"),
 }
+
+
+@dataclass(frozen=True)
+class Scrape:
+    texts: tuple[str, ...]  # exposition document from each endpoint that answered
+    failed: tuple[str, ...]  # endpoints that did not answer
+
+
+def metrics_endpoints() -> list[str]:
+    """Return the Prometheus metrics endpoint for every alive Ray node.
+
+    Returns:
+        One metrics URL per alive node in the current Ray cluster.
+    """
+    return [
+        f"http://{node['NodeManagerAddress']}:{node['MetricsExportPort']}/metrics"
+        for node in ray.nodes()
+        if node.get("alive")
+    ]
+
+
+def node_roles() -> dict[str, str]:
+    """Map Ray node addresses to their configured SpatialRay pool roles.
+
+    Returns:
+        Node address to pool name for nodes carrying a pool resource.
+    """
+    roles = {}
+    for node in ray.nodes():
+        address = node["NodeManagerAddress"]
+        for resource in node.get("Resources", {}):
+            if resource.endswith(_NODE_RESOURCE_SUFFIX):
+                roles[address] = resource[: -len(_NODE_RESOURCE_SUFFIX)]
+    return roles
+
+
+def scrape(endpoints: list[str]) -> Scrape:
+    """Fetch Prometheus exposition documents from Ray nodes concurrently.
+
+    Args:
+        endpoints: Ray node metrics URLs to fetch.
+
+    Returns:
+        The documents that answered and the endpoints that failed.
+    """
+    if not endpoints:
+        return Scrape(texts=(), failed=())
+    with ThreadPoolExecutor(max_workers=len(endpoints)) as pool:
+        fetched = tuple(pool.map(_fetch, endpoints))
+    return Scrape(
+        texts=tuple(text for text in fetched if text is not None),
+        failed=tuple(url for url, text in zip(endpoints, fetched, strict=True) if text is None),
+    )
+
+
+def _fetch(url: str) -> str | None:
+    # fetch one exposition document while treating network failures as missing samples
+    try:
+        with urllib.request.urlopen(url, timeout=_SCRAPE_TIMEOUT_S) as response:
+            return response.read().decode()
+    except OSError:
+        return None
+
+
+def reduce_families(
+    texts: list[str], specs: Mapping[str, tuple[str, str]]
+) -> dict[str, dict[str, float]]:
+    """Reduce requested Prometheus families for benchmark reporting.
+
+    Args:
+        texts: Prometheus exposition documents from the sampled nodes.
+        specs: Family name to grouping label and reduction of last, sum, or mean.
+
+    Returns:
+        Family name to grouped reduced values.
+    """
+    reduced: dict[str, dict[str, float]] = {name: {} for name in specs}
+    reporters: dict[str, dict[str, int]] = {name: {} for name in specs}
+    for text in texts:
+        for family in text_string_to_metric_families(text):
+            spec = specs.get(family.name)
+            if spec is None:
+                continue
+            label, aggregation = spec
+            bucket = reduced[family.name]
+            counted = reporters[family.name]
+            for sample in family.samples:
+                key = sample.labels.get(label)
+                if key is None:
+                    continue
+                if aggregation in ("sum", "mean") and key in bucket:
+                    bucket[key] += sample.value
+                else:
+                    bucket[key] = sample.value
+                counted[key] = counted.get(key, 0) + 1
+    for name, (_, aggregation) in specs.items():
+        if aggregation == "mean":
+            reduced[name] = {
+                key: total / reporters[name][key] for key, total in reduced[name].items()
+            }
+    return reduced
 
 
 @dataclass(frozen=True)
@@ -57,7 +160,7 @@ def parse_snapshot(scraped: Scrape, t_s: float) -> Snapshot:
     Returns:
         A Snapshot holding per-node hardware gauges and per-deployment work and backlog.
     """
-    reduced, _ = reduce_families(list(scraped.texts), _SNAPSHOT_SPECS)
+    reduced = reduce_families(list(scraped.texts), _SNAPSHOT_SPECS)
     return Snapshot(
         t_s=t_s,
         node_cpu=reduced[NODE_CPU],

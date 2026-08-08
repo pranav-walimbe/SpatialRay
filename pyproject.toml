@@ -11,7 +11,7 @@ license = "MIT"
 authors = [
     { name = "Pranav Walimbe" },
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 1 - Planning",
     "Intended Audience :: Science/Research",
@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 serve = [
-    "ray[serve]>=2.9",
+    "ray[serve]>=2.56,<2.57",
     "torch>=2.2",
 ]
 perf = [
@@ -60,7 +60,7 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "D"]

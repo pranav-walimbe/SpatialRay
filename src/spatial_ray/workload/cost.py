@@ -38,6 +38,26 @@ def predicted_tiles(request: RasterRequest) -> int:
     Returns:
         Count of whole tile_size squares the reprojected array is cut into.
     """
+    dst_h, dst_w = _predicted_output_shape(request)
+    size = request.tile_size
+    return (dst_h // size) * (dst_w // size)
+
+
+def predicted_pixel_bands(request: RasterRequest) -> int:
+    """Predict the pixel-band work processed by the transform pool.
+
+    Args:
+        request: Request whose output grid and bands set transform work.
+
+    Returns:
+        Number of output pixels multiplied by the requested band count.
+    """
+    dst_h, dst_w = _predicted_output_shape(request)
+    return dst_h * dst_w * len(request.band_names)
+
+
+def _predicted_output_shape(request: RasterRequest) -> tuple[int, int]:
+    # calculate the reprojected output grid without reading raster data
     scene = request.scene
     row_off, col_off, height, width = request.window
     ref_transform = Affine(*scene.transform)
@@ -54,5 +74,4 @@ def predicted_tiles(request: RasterRequest) -> int:
         top,
         resolution=request.target_gsd,
     )
-    size = request.tile_size
-    return (dst_h // size) * (dst_w // size)
+    return dst_h, dst_w

@@ -12,11 +12,16 @@ import ray
 from ray import serve
 
 from perf.cloud.app import from_config
-from perf.cloud.controller import start_controller, stop_controller
-from perf.cloud.metrics import LatencyAccumulator, Snapshot, parse_snapshot
+from perf.cloud.metrics import (
+    LatencyAccumulator,
+    Snapshot,
+    metrics_endpoints,
+    node_roles,
+    parse_snapshot,
+    scrape,
+)
 from perf.common.models import load
 from perf.common.trace import build_default_trace
-from spatial_ray.control.ray_metrics import metrics_endpoints, node_roles, scrape
 
 _SAMPLE_INTERVAL_S = 1.0  # metrics scrape period during the run
 
@@ -35,7 +40,7 @@ class Report:
 
 
 def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -> Report:
-    """Deploy the disaggregated graph, autoscale it with the controller, and drive a Poisson trace.
+    """Deploy the disaggregated graph and drive a Poisson trace while sampling metrics.
 
     Args:
         model_name: Model module name under perf.common.models for the inference pool.
@@ -52,7 +57,6 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
     ray.init(ignore_reinit_error=True)
     try:
         handle = serve.run(application.graph, name=application.app_name)
-        start_controller(model_name, hardware)
         endpoints = metrics_endpoints()
         roles = node_roles()
         samples: list[Snapshot] = []
@@ -60,7 +64,6 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         wall_s = asyncio.run(_run_load(handle, trace, endpoints, samples, latency))
         latency.update(list(scrape(endpoints).texts))
     finally:
-        stop_controller()
         serve.shutdown()
         ray.shutdown()
 

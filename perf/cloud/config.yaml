@@ -25,8 +25,6 @@ pools:
     nodes: 2
     replicas: 6
     num_cpus: 1
-    min_replicas: 1
-    max_replicas: 8
     max_ongoing_requests: 12
     max_concurrency: 12
   transform:
@@ -35,15 +33,11 @@ pools:
     nodes: 1
     replicas: 2
     num_cpus: 2
-    min_replicas: 1
-    max_replicas: 2
     max_ongoing_requests: 8
     max_concurrency: 8
   inference:
     nodes: 2
     replicas: 2
-    min_replicas: 1
-    max_replicas: 2
     max_ongoing_requests: 8
     max_concurrency: 8
     cpu:
@@ -60,12 +54,3 @@ ingress:
   node: transform
   replicas: 2
   max_ongoing_requests: 36
-
-# dynamic-policy inputs
-controller:
-  tick_s: 4.0
-  warmup_s: 60.0
-  decode_target_ongoing_requests: 8.0
-  inference_target_ongoing_requests: 4.0
-  transform_util_target: 0.7
-  inference_util_target: 0.45

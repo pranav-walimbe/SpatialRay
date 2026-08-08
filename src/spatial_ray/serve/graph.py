@@ -11,6 +11,7 @@ from typing import Any
 from ray import serve
 
 from spatial_ray.serve.deployments import InferencePool, Ingress, StagePool
+from spatial_ray.workload.cost import decoded_bytes, predicted_pixel_bands, predicted_tiles
 from spatial_ray.workload.profiler import Stage
 from spatial_ray.workload.stages import decode, normalize, reproject_stage, tile
 
@@ -30,6 +31,7 @@ class PoolSpec:
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling overriding num_replicas
     work_unit: str | None = None  # work-in-flight gauge unit of bytes or tiles that None disables
+    work_estimator: Callable[[Any], float] | None = None  # submitted request to pool work units
 
 
 @dataclass(frozen=True)
@@ -42,11 +44,17 @@ class InferenceSpec:
     ray_actor_options: Mapping[str, Any] = field(default_factory=dict)  # per-replica resources
     autoscaling_config: Mapping[str, Any] | None = None  # Serve autoscaling overriding num_replicas
     work_unit: str | None = "tiles"  # work-in-flight gauge unit that None disables
+    work_estimator: Callable[[Any], float] | None = predicted_tiles  # submitted request work
 
 
 DISAGGREGATED: tuple[PoolSpec, ...] = (
-    PoolSpec(name="decode", stages=(decode,), work_unit="bytes"),
-    PoolSpec(name="transform", stages=(reproject_stage, normalize, tile), work_unit="tiles"),
+    PoolSpec(name="decode", stages=(decode,), work_unit="bytes", work_estimator=decoded_bytes),
+    PoolSpec(
+        name="transform",
+        stages=(reproject_stage, normalize, tile),
+        work_unit="pixel_bands",
+        work_estimator=predicted_pixel_bands,
+    ),
 )
 
 
@@ -77,6 +85,39 @@ def deployment_options(spec: PoolSpec | InferenceSpec) -> dict[str, Any]:
     return options
 
 
+def ingress_deployment_options(
+    options: Mapping[str, Any] | None = None,
+    *,
+    fixed_autoscaling: bool = False,
+) -> dict[str, Any]:
+    """Render ingress options and optionally expose it as a fixed autoscaling context.
+
+    Args:
+        options: Serve options overriding the ingress defaults, none keeps them.
+        fixed_autoscaling: Whether to express the replica count as a fixed autoscaling range.
+
+    Returns:
+        Kwargs for the ingress deployment's Serve options.
+    """
+    rendered = {"num_replicas": DEFAULT_NUM_REPLICAS, **dict(options or {})}
+    rendered["ray_actor_options"] = {
+        "runtime_env": {"env_vars": REPLICA_ENV_VARS},
+        **rendered.get("ray_actor_options", {}),
+    }
+    if fixed_autoscaling:
+        if "autoscaling_config" in rendered:
+            raise ValueError(
+                "ingress_options cannot set autoscaling_config with an application policy"
+            )
+        replicas = rendered.pop("num_replicas")
+        rendered["autoscaling_config"] = {
+            "min_replicas": replicas,
+            "initial_replicas": replicas,
+            "max_replicas": replicas,
+        }
+    return rendered
+
+
 def build_graph(
     grouping: Sequence[PoolSpec] = DISAGGREGATED,
     *,
@@ -104,10 +145,11 @@ def build_graph(
         .options(**deployment_options(inference))
         .bind(inference.model_factory, inference.work_unit, inference.max_concurrency)
     )
-    options = {"num_replicas": DEFAULT_NUM_REPLICAS, **dict(ingress_options or {})}
-    options["ray_actor_options"] = {
-        "runtime_env": {"env_vars": REPLICA_ENV_VARS},
-        **options.get("ray_actor_options", {}),
-    }
+    options = ingress_deployment_options(ingress_options)
     ingress = serve.deployment(Ingress).options(name="ingress", **options)
-    return ingress.bind(pools, inference_pool)
+    estimators = {
+        spec.name: spec.work_estimator
+        for spec in (*grouping, inference)
+        if spec.work_estimator is not None
+    }
+    return ingress.bind(pools, inference_pool, estimators)
