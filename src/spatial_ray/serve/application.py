@@ -24,6 +24,7 @@ class Application:
     import_path: str  # module path Ray re-imports to rebuild this graph, e.g. perf.cloud.app:app
     app_name: str = DEFAULT_APP_NAME  # name shared by the bound graph and the compiled config
     ingress_options: Mapping[str, Any] = field(default_factory=dict)  # ingress Serve options
+    ledger_options: Mapping[str, Any] = field(default_factory=dict)  # fixed ledger Serve options
     autoscaling_policy: Mapping[str, Any] | None = None  # application-level Ray scaling policy
 
     @property
@@ -34,7 +35,11 @@ class Application:
             The bound ingress application ready for serve.run or the serve run CLI.
         """
         return build_graph(
-            self.grouping, inference=self.inference, ingress_options=self.ingress_options
+            self.grouping,
+            inference=self.inference,
+            ingress_options=self.ingress_options,
+            track_pending_work=self.autoscaling_policy is not None,
+            ledger_options=self.ledger_options,
         )
 
     @property
@@ -50,6 +55,7 @@ class Application:
             import_path=self.import_path,
             app_name=self.app_name,
             ingress_options=self.ingress_options,
+            ledger_options=self.ledger_options,
             autoscaling_policy=self.autoscaling_policy,
         )
 
@@ -70,6 +76,12 @@ class Application:
             raise ValueError(
                 f"pool scaling config mismatch, missing: {missing}, unknown: {unknown}"
             )
+        missing_estimators = [
+            spec.name for spec in (*self.grouping, self.inference) if spec.work_estimator is None
+        ]
+        if missing_estimators:
+            names = ", ".join(missing_estimators)
+            raise ValueError(f"workload autoscaling requires estimators for pools: {names}")
         grouping = tuple(
             replace(spec, autoscaling_config=pools[spec.name].deployment_config())
             for spec in self.grouping

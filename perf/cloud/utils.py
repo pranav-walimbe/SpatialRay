@@ -86,17 +86,6 @@ def save_text_report(report: Report, path) -> None:
     lines += _reduced_section("Processing at replicas (requests)", report, "queue", None)
     lines += _reduced_section("Queued at routers (requests)", report, "queued", None)
 
-    # per-pool work in flight labeled by unit with bytes pools reduced to MiB
-    work_rows = []
-    for deployment in _keys(report.samples, "work"):
-        unit = report.work_units.get(deployment, "?")
-        stats = _reduce(report.samples, "work", deployment, _MIB if unit == "bytes" else 1.0)
-        if stats is None:
-            continue
-        display_unit = "MiB" if unit == "bytes" else unit
-        work_rows.append((deployment, display_unit, f"{stats[0]:.2f}", f"{stats[1]:.2f}"))
-    lines += _section("Work in flight", ("pool", "unit", "mean", "peak"), work_rows)
-
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

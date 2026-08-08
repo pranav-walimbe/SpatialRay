@@ -36,7 +36,6 @@ class Report:
     samples: tuple[Snapshot, ...]  # metrics snapshots sampled across the run
     latency: dict[str, dict]  # deployment to its cumulative latency stats
     roles: dict[str, str]  # node ip to the stage it hosts
-    work_units: dict[str, str]  # deployment to its work-in-flight unit label
 
 
 def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -> Report:
@@ -76,16 +75,7 @@ def run(*, model_name: str, hardware: str, n_requests: int, rate_per_s: float) -
         samples=tuple(samples),
         latency=latency.stats(),
         roles=roles,
-        work_units=_work_units(application.grouping, application.inference),
     )
-
-
-def _work_units(pools, inference):
-    # map each deployment to its work-in-flight unit from the spec rather than the metric label
-    units = {spec.name: spec.work_unit for spec in pools if spec.work_unit}
-    if inference.work_unit:
-        units[inference.name] = inference.work_unit
-    return units
 
 
 async def _run_load(handle, trace, endpoints, samples, latency):

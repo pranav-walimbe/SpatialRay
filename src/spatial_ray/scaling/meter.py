@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from math import isfinite
 from typing import Protocol
 
-from spatial_ray.scaling.metrics import mean_work_metric, request_rate_metric, work_rate_metric
+from spatial_ray.scaling.metrics import work_rate_metric
 
 
 class WorkEstimator(Protocol):
@@ -38,29 +38,27 @@ class WorkloadMeter:
         *,
         window_s: float = 30.0,
         min_window_s: float = 1.0,
-        mean_alpha: float = 0.1,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         if window_s <= 0.0:
             raise ValueError(f"window_s must be positive, got {window_s}")
         if min_window_s <= 0.0 or min_window_s > window_s:
             raise ValueError(f"min_window_s must be in (0, window_s], got {min_window_s}")
-        if not 0.0 < mean_alpha <= 1.0:
-            raise ValueError(f"mean_alpha must be in (0, 1], got {mean_alpha}")
         self._estimators = dict(estimators)
         self._window_s = window_s
         self._min_window_s = min_window_s
-        self._mean_alpha = mean_alpha
         self._time_fn = time_fn
         self._events: deque[tuple[float, dict[str, float]]] = deque()
-        self._mean_work: dict[str, float] = {}
         self._lock = threading.Lock()
 
-    def record(self, item: object) -> None:
+    def record(self, item: object) -> dict[str, float]:
         """Record one submitted item for every configured pool.
 
         Args:
             item: Item whose stage work each estimator predicts.
+
+        Returns:
+            Validated estimated work keyed by pool name.
         """
         work = {name: float(estimator(item)) for name, estimator in self._estimators.items()}
         invalid = {
@@ -70,15 +68,9 @@ class WorkloadMeter:
             raise ValueError(f"work estimates must be nonnegative, got {invalid}")
         now = self._time_fn()
         with self._lock:
-            for name, value in work.items():
-                previous = self._mean_work.get(name)
-                self._mean_work[name] = (
-                    value
-                    if previous is None
-                    else self._mean_alpha * value + (1.0 - self._mean_alpha) * previous
-                )
             self._events.append((now, work))
             self._prune(now)
+        return work
 
     def snapshot(self) -> dict[str, float]:
         """Return recent work and request rates for each configured pool.
@@ -90,7 +82,6 @@ class WorkloadMeter:
         with self._lock:
             self._prune(now)
             events = tuple(self._events)
-            means = dict(self._mean_work)
         rates: dict[str, float] = {}
         if events:
             elapsed_s = max(self._min_window_s, min(self._window_s, now - events[0][0]))
@@ -98,8 +89,6 @@ class WorkloadMeter:
             elapsed_s = self._window_s
         for name in self._estimators:
             rates[work_rate_metric(name)] = sum(event[1][name] for event in events) / elapsed_s
-            rates[request_rate_metric(name)] = len(events) / elapsed_s
-            rates[mean_work_metric(name)] = means.get(name, 0.0)
         return rates
 
     def _prune(self, now: float) -> None:

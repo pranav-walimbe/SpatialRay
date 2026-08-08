@@ -223,18 +223,14 @@ def _download(s3, cfg, run_id, name, dest):
 
 
 def _write_run_logs(s3, cfg, run_id, report_path):
-    # the head node's whole progress log plus the controller-only view of its per-tick lines
+    # write the head node's whole progress log beside the reduced report
     key = f"{_RESULT_PREFIX}/{run_id}/progress.log"
     body = s3.get_object(Bucket=cfg["result_bucket"], Key=key)["Body"].read().decode()
     lines = body.splitlines()
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    written = {
-        report_path.with_name(f"{report_path.stem}-progress.log"): lines,
-        report_path.with_suffix(".log"): [line for line in lines if "[controller]" in line],
-    }
-    for dest, selected in written.items():
-        dest.write_text("\n".join(selected) + "\n")
-        print(f"wrote {dest}")
+    destination = report_path.with_name(f"{report_path.stem}-progress.log")
+    destination.write_text("\n".join(lines) + "\n")
+    print(f"wrote {destination}")
 
 
 if __name__ == "__main__":

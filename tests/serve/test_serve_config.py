@@ -54,13 +54,16 @@ def test_compile_application_autoscaling_policy():
     )
     application = config["applications"][0]
     assert application["autoscaling_policy"] == policy
-    ingress = application["deployments"][-1]
+    ingress = application["deployments"][-2]
     assert ingress["name"] == "ingress"
     assert ingress["autoscaling_config"] == {
         "min_replicas": 1,
         "initial_replicas": 1,
         "max_replicas": 1,
     }
+    ledger = application["deployments"][-1]
+    assert ledger["name"] == "pending_work_ledger"
+    assert ledger["num_replicas"] == 1
 
 
 def test_application_policy_rejects_static_pools():

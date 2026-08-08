@@ -3,8 +3,9 @@ The stable metric names shared by workload meters and scaling adapters.
 """
 
 WORK_RATE_PREFIX = "spatialray_work_rate_"
-REQUEST_RATE_PREFIX = "spatialray_request_rate_"
-MEAN_WORK_PREFIX = "spatialray_mean_work_"
+PENDING_WORK_PREFIX = "spatialray_pending_work_"
+EXECUTING_WORK_PREFIX = "spatialray_executing_work_"
+LEDGER_SNAPSHOT_AGE = "spatialray_ledger_snapshot_age_s"
 
 
 def work_rate_metric(pool: str) -> str:
@@ -19,8 +20,8 @@ def work_rate_metric(pool: str) -> str:
     return f"{WORK_RATE_PREFIX}{pool}"
 
 
-def request_rate_metric(pool: str) -> str:
-    """Return the custom request-rate metric name for a pool.
+def pending_work_metric(pool: str) -> str:
+    """Return the exact pending-work metric name for a pool.
 
     Args:
         pool: Pool whose metric name to build.
@@ -28,11 +29,11 @@ def request_rate_metric(pool: str) -> str:
     Returns:
         The metric key reported through the runtime autoscaling context.
     """
-    return f"{REQUEST_RATE_PREFIX}{pool}"
+    return f"{PENDING_WORK_PREFIX}{pool}"
 
 
-def mean_work_metric(pool: str) -> str:
-    """Return the retained mean-work metric name for a pool.
+def executing_work_metric(pool: str) -> str:
+    """Return the exact executing-work metric name for a pool.
 
     Args:
         pool: Pool whose metric name to build.
@@ -40,4 +41,4 @@ def mean_work_metric(pool: str) -> str:
     Returns:
         The metric key reported through the runtime autoscaling context.
     """
-    return f"{MEAN_WORK_PREFIX}{pool}"
+    return f"{EXECUTING_WORK_PREFIX}{pool}"

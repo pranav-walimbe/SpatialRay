@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from spatial_ray.scaling.meter import WorkloadMeter
-from spatial_ray.scaling.metrics import mean_work_metric, request_rate_metric, work_rate_metric
+from spatial_ray.scaling.metrics import work_rate_metric
 
 
 class _Clock:
@@ -18,7 +18,7 @@ class _Clock:
         return self.now
 
 
-def test_reports_work_and_request_rates_per_pool():
+def test_reports_work_rates_per_pool():
     """Each pool receives its own weighted rate over the same request stream."""
     clock = _Clock()
     meter = WorkloadMeter(
@@ -26,14 +26,15 @@ def test_reports_work_and_request_rates_per_pool():
         window_s=10.0,
         time_fn=clock,
     )
-    meter.record({"bytes": 100.0, "tiles": 2.0})
+    assert meter.record({"bytes": 100.0, "tiles": 2.0}) == {
+        "decode": 100.0,
+        "inference": 2.0,
+    }
     clock.now = 2.0
     meter.record({"bytes": 300.0, "tiles": 6.0})
     metrics = meter.snapshot()
     assert metrics[work_rate_metric("decode")] == 200.0
     assert metrics[work_rate_metric("inference")] == 4.0
-    assert metrics[request_rate_metric("decode")] == 1.0
-    assert metrics[mean_work_metric("decode")] == 120.0
 
 
 def test_expires_old_work():
@@ -44,7 +45,6 @@ def test_expires_old_work():
     clock.now = 6.0
     metrics = meter.snapshot()
     assert metrics[work_rate_metric("decode")] == 0.0
-    assert metrics[mean_work_metric("decode")] == 100.0
 
 
 def test_rejects_negative_work():

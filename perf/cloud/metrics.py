@@ -17,7 +17,6 @@ NODE_CPU = "ray_node_cpu_utilization"
 NODE_GPU = "ray_node_gpus_utilization"
 NODE_GRAM = "ray_node_gram_used"
 NODE_MEM = "ray_node_mem_used"
-WORK = "ray_spatialray_work_in_flight"
 QUEUE = "ray_serve_replica_processing_queries"
 QUEUED = "ray_serve_deployment_queued_queries"
 
@@ -31,7 +30,6 @@ _SNAPSHOT_SPECS = {
     NODE_GPU: ("ip", "sum"),
     NODE_GRAM: ("ip", "sum"),
     NODE_MEM: ("ip", "last"),
-    WORK: ("deployment", "sum"),
     QUEUE: ("deployment", "sum"),
     QUEUED: ("deployment", "sum"),
 }
@@ -145,7 +143,6 @@ class Snapshot:
     node_gpu: dict[str, float]  # node ip to summed GPU utilization percent
     node_gram: dict[str, float]  # node ip to GPU memory used in bytes
     node_mem: dict[str, float]  # node ip to system memory used in bytes
-    work: dict[str, float]  # deployment to work units in flight from our custom gauge
     queue: dict[str, float]  # deployment to queries being processed across its replicas
     queued: dict[str, float]  # deployment to queries waiting at the routers for a replica
 
@@ -167,7 +164,6 @@ def parse_snapshot(scraped: Scrape, t_s: float) -> Snapshot:
         node_gpu=reduced[NODE_GPU],
         node_gram=reduced[NODE_GRAM],
         node_mem=reduced[NODE_MEM],
-        work=reduced[WORK],
         queue=reduced[QUEUE],
         queued=reduced[QUEUED],
     )

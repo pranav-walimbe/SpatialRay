@@ -62,7 +62,10 @@ def test_serve_config_application_policy():
     )
     config = application.serve_config["applications"][0]
     assert config["autoscaling_policy"] == {"policy_function": "pkg.policy:scale"}
-    assert config["deployments"][-1]["name"] == "ingress"
+    assert [deployment["name"] for deployment in config["deployments"][-2:]] == [
+        "ingress",
+        "pending_work_ledger",
+    ]
 
 
 def test_with_workload_autoscaling_configures_every_pool():
@@ -78,12 +81,14 @@ def test_with_workload_autoscaling_configures_every_pool():
         }
     )
     config = application.serve_config["applications"][0]
+    assert application.graph is not None
     assert config["autoscaling_policy"]["policy_function"] == POLICY_IMPORT_PATH
     assert {deployment["name"] for deployment in config["deployments"]} == {
         "decode",
         "transform",
         "inference",
         "ingress",
+        "pending_work_ledger",
     }
 
 

@@ -8,10 +8,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from spatial_ray.serve.graph import (
+    LEDGER_DEPLOYMENT_NAME,
     InferenceSpec,
     PoolSpec,
     deployment_options,
     ingress_deployment_options,
+    ledger_deployment_options,
 )
 
 
@@ -22,6 +24,7 @@ def compile_serve_config(
     import_path: str,
     app_name: str = "spatialray",
     ingress_options: Mapping[str, Any] | None = None,
+    ledger_options: Mapping[str, Any] | None = None,
     autoscaling_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile a pool grouping and inference spec into a serveConfigV2 application.
@@ -32,6 +35,7 @@ def compile_serve_config(
         import_path: Module path to the bound Serve application, e.g. perf.cloud.app:app.
         app_name: Name of the compiled application.
         ingress_options: Serve options overriding the ingress defaults, none keeps them.
+        ledger_options: Serve options overriding the fixed ledger defaults, none keeps them.
         autoscaling_policy: Optional Ray Serve application-level policy configuration.
 
     Returns:
@@ -53,6 +57,12 @@ def compile_serve_config(
             {
                 "name": "ingress",
                 **ingress_deployment_options(ingress_options, fixed_autoscaling=True),
+            }
+        )
+        deployments.append(
+            {
+                "name": LEDGER_DEPLOYMENT_NAME,
+                **ledger_deployment_options(ledger_options),
             }
         )
     application = {
